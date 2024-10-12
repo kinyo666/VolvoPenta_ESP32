@@ -1,7 +1,7 @@
 /*
   TODO :
   - Tester si les sondes sont présentes et ne pas les attacher à un path signal K le cas échéant (comment le tester ??)
-  - Définir une callback pour les INA3221 avec un RepeatSensor<T> (à priori un seul type)
+  - Ajouter un calcul de consommation
   - Ajouter un compteur de chaine (à partir du signal 12V?)
 
   @author B. DIVERCHY
@@ -40,10 +40,10 @@
 
 // Volt / Current sensors INA3221
 #define INA3221_BABORD_0 0
-#define INA3221_BABORD_1 1
+#define INA3221_CUVES_1 1
 #define INA3221_TRIBORD_2 2
-#define INA3221_TRIBORD_3 3
-#define INA3221_NB 4
+//#define INA3221_TRIBORD_3 3
+#define INA3221_NB 3
 
 // RPM sensors EL817
 #define EL817_BABORD_PIN 34
@@ -53,7 +53,7 @@
 #define ENGINE_BABORD 0
 #define ENGINE_TRIBORD 1
 #define ENGINE_NB 2
-#define ENGINE_SK_PATH_NB 6
+#define ENGINE_SK_PATH_NB 3
 
 #define DEBUG_MODE 1
 
@@ -65,7 +65,7 @@ class FuelConsumption : public CurveInterpolator {
  public:
   FuelConsumption(String config_path = "")
       : CurveInterpolator(NULL, config_path) {
-    // Populate a lookup table to translate the RPM values to L/h
+    // Populate a lookup table to translate the RPM values to L/h (1 L/h = 0,001 m3/h)
     clear_samples();
     // addSample(CurveInterpolator::Sample(rpmValue, litersPerHour));
     add_sample(CurveInterpolator::Sample(2000, 23.80));
@@ -88,17 +88,7 @@ class FuelConsumption : public CurveInterpolator {
   }
 };
 
-// Engine values structure (float values for Signal-K compatibility)
-/*
-typedef struct {
-  uint8_t state;
-  uint8_t revolutions;
-  uint16_t runTime;
-  uint16_t runTimeTrip;
-  uint16_t startTimeTrip;       // will be calculated by the SK plugin horometer
-  uint16_t stopTimeTrip;
-} engines_data_t;
-*/
+enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE };
 
 // Constants for Signal-K path & ESP config
 const String ssid = "Bbox-75CDA064"; // "BirchwoodTS33"
@@ -111,7 +101,6 @@ const char* sk_path_engines[ENGINE_NB][ENGINE_SK_PATH_NB];
 const char* conf_path_temp[DS18B20_NB];
 const char* conf_path_volt[INA3221_NB][INA3221_CH_NUM];
 const char* conf_path_engines[ENGINE_NB];
-const uint8_t pin = DS18B20_PIN;
 const unsigned int read_delay = 2000;
 
 // Temperature & Voltage sensors
@@ -119,9 +108,6 @@ OneWireTemperature* sensor_temp[DS18B20_NB];                  // 3 DS18B20 Tempe
 INA3221 *sensor_INA3221[INA3221_NB];                          // 4 INA3221 Voltage Sensors with 3 channels each
 RepeatSensor<float> *sensor_volt[INA3221_NB][INA3221_CH_NUM]; // 4 Voltage values for each channels
 DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 EL817 RPM Sensors values
-//engines_data_t *engines_data[ENGINE_NB];                      // 2 Engines data
-//JsonDocument engines_data_json[ENGINE_NB];
-
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 //reactesp::ReactESP app;
@@ -134,8 +120,8 @@ reactesp::EventLoop app;
 // @param index Slot for INA3221 < INA3221_NB
 // @param addr Physical A0 address of the INA3221 sensor
 void setupSensorINA3221(u_int8_t index, ina3221_addr_t addr = INA3221_ADDR40_GND) {
-  sensor_INA3221[index] = new INA3221(addr);  // Set I2C default address to 0x40 GND
-  delay(800);
+  sensor_INA3221[index] = new INA3221(addr);  // Set I2C default address to 0x40 GND or addr
+  //delay(800);
   sensor_INA3221[index]->begin(&Wire);        // Default shunt resistors = 10 mOhm (R100)
   sensor_INA3221[index]->reset();
   #ifdef DEBUG_MODE
@@ -144,33 +130,15 @@ void setupSensorINA3221(u_int8_t index, ina3221_addr_t addr = INA3221_ADDR40_GND
 }
 
 // Callbacks for Sensor Volt
-float getVoltageINA3221_BABORD0_CH1() { return sensor_INA3221[INA3221_BABORD_0]->getVoltage(INA3221_CH1); }    // Temp
-float getVoltageINA3221_BABORD0_CH2() { return sensor_INA3221[INA3221_BABORD_0]->getVoltage(INA3221_CH2); }    // Oil
+float getVoltageINA3221_BABORD0_CH1() { return sensor_INA3221[INA3221_BABORD_0]->getVoltage(INA3221_CH1); }    // Coolant temperature
+float getVoltageINA3221_BABORD0_CH2() { return sensor_INA3221[INA3221_BABORD_0]->getVoltage(INA3221_CH2); }    // Oil pressure
 float getVoltageINA3221_BABORD0_CH3() { return sensor_INA3221[INA3221_BABORD_0]->getVoltage(INA3221_CH3); }    // Voltage
-float getVoltageINA3221_TRIBORD2_CH1() { return sensor_INA3221[INA3221_TRIBORD_2]->getVoltage(INA3221_CH1); }  // Temp
-float getVoltageINA3221_TRIBORD2_CH2() { return sensor_INA3221[INA3221_TRIBORD_2]->getVoltage(INA3221_CH2); }  // Oil
+float getVoltageINA3221_CUVES1_CH1() { return sensor_INA3221[INA3221_CUVES_1]->getVoltage(INA3221_CH1); }      // Fuel tank volume
+float getVoltageINA3221_CUVES1_CH2() { return sensor_INA3221[INA3221_CUVES_1]->getVoltage(INA3221_CH2); }      // Fuel tank volume
+float getVoltageINA3221_CUVES1_CH3() { return sensor_INA3221[INA3221_CUVES_1]->getVoltage(INA3221_CH3); }      // Water tank volume
+float getVoltageINA3221_TRIBORD2_CH1() { return sensor_INA3221[INA3221_TRIBORD_2]->getVoltage(INA3221_CH1); }  // Coolant temperature
+float getVoltageINA3221_TRIBORD2_CH2() { return sensor_INA3221[INA3221_TRIBORD_2]->getVoltage(INA3221_CH2); }  // Oil pressure
 float getVoltageINA3221_TRIBORD2_CH3() { return sensor_INA3221[INA3221_TRIBORD_2]->getVoltage(INA3221_CH3); }  // Voltage
-//void skRequestCallback(JsonDocument response) { String output; serializeJsonPretty(response, output); Serial.println("JSON :" + output); }
-
-/* Returns the engine state { off, on, idle, running } depending of the rpm and voltage values
-  @param rpm Revolutions per minute from engine sensor
-  @param voltage Voltage 12V if it is up
-  @return String Engine state
-*/
-String getEngineState(uint8_t rpm, float voltage = 0.0F) {
-  String state = "off";
-
-  if ((rpm == 0) && (voltage <= 0.0))
-    state = "off";
-  else if ((rpm == 0) && (voltage > 0.0))
-    state = "on";
-  else if ((rpm > 500) && (rpm < 750))
-    state = "idle";
-  else if (rpm >= 750)
-    state = "running";
-
-  return state;
-}
 
 // Setup Signal-K paths
 void setupSignalKPath() {
@@ -185,21 +153,15 @@ void setupSignalKPath() {
   sk_path_volt[INA3221_BABORD_0][INA3221_CH1] = "propulsion.babord.coolantTemperature";
   sk_path_volt[INA3221_BABORD_0][INA3221_CH2] = "propulsion.babord.oilPressure";
   sk_path_volt[INA3221_BABORD_0][INA3221_CH3] = "propulsion.babord.alternatorVoltage";
+  sk_path_volt[INA3221_CUVES_1][INA3221_CH1] = "tanks.fuel.babord.currentVolume";
+  sk_path_volt[INA3221_CUVES_1][INA3221_CH2] = "tanks.fuel.tribord.currentVolume";
+  sk_path_volt[INA3221_CUVES_1][INA3221_CH3] = "tanks.freshWater.eaudouce.currentVolume";
   sk_path_volt[INA3221_TRIBORD_2][INA3221_CH1] = "propulsion.tribord.coolantTemperature";
   sk_path_volt[INA3221_TRIBORD_2][INA3221_CH2] = "propulsion.tribord.oilPressure";
   sk_path_volt[INA3221_TRIBORD_2][INA3221_CH3] = "propulsion.tribord.alternatorVoltage"; 
-  sk_path_engines[ENGINE_BABORD][0] = "propulsion.babord.revolutions";
-  sk_path_engines[ENGINE_BABORD][1] = "propulsion.babord.state";
-  sk_path_engines[ENGINE_BABORD][2] = "propulsion.babord.runTime";
-  sk_path_engines[ENGINE_BABORD][3] = "propulsion.babord.runTimeTrip";
-  sk_path_engines[ENGINE_BABORD][4] = "propulsion.babord.startTimeTrip";
-  sk_path_engines[ENGINE_BABORD][5] = "propulsion.babord.stopTimeTrip";
-  sk_path_engines[ENGINE_TRIBORD][0] = "propulsion.tribord.revolutions";
-  sk_path_engines[ENGINE_TRIBORD][1] = "propulsion.tribord.state";
-  sk_path_engines[ENGINE_TRIBORD][2] = "propulsion.tribord.runTime";
-  sk_path_engines[ENGINE_TRIBORD][3] = "propulsion.tribord.runTimeTrip";
-  sk_path_engines[ENGINE_TRIBORD][4] = "propulsion.tribord.startTimeTrip";
-  sk_path_engines[ENGINE_TRIBORD][5] = "propulsion.tribord.stopTimeTrip";
+  sk_path_engines[ENGINE_BABORD][REVOLUTIONS] = "propulsion.babord.revolutions";
+  sk_path_engines[ENGINE_BABORD][FUELRATE] = "propulsion.babord.fuel.rate";
+  sk_path_engines[ENGINE_TRIBORD][REVOLUTIONS] = "propulsion.tribord.revolutions";
 }
 
 // Setup SensESP Run-time Config for each Sensor / Linear Class
@@ -215,15 +177,12 @@ void setupSensESPConfig() {
   conf_path_volt[INA3221_BABORD_0][INA3221_CH1] = "/config/BABORD/INA3221/0/LINEAR_CH1";
   conf_path_volt[INA3221_BABORD_0][INA3221_CH2] = "/config/BABORD/INA3221/0/LINEAR_CH2";
   conf_path_volt[INA3221_BABORD_0][INA3221_CH3] = "/config/BABORD/INA3221/0/LINEAR_CH3";
-  conf_path_volt[INA3221_BABORD_1][INA3221_CH1] = "/config/BABORD/INA3221/1/LINEAR_CH1";
-  conf_path_volt[INA3221_BABORD_1][INA3221_CH2] = "/config/BABORD/INA3221/1/LINEAR_CH2";
-  conf_path_volt[INA3221_BABORD_1][INA3221_CH3] = "/config/BABORD/INA3221/1/LINEAR_CH3";
+  conf_path_volt[INA3221_CUVES_1][INA3221_CH1] = "/config/CUVES/INA3221/1/LINEAR_CH1";
+  conf_path_volt[INA3221_CUVES_1][INA3221_CH2] = "/config/CUVES/INA3221/1/LINEAR_CH2";
+  conf_path_volt[INA3221_CUVES_1][INA3221_CH3] = "/config/CUVES/INA3221/1/LINEAR_CH3";
   conf_path_volt[INA3221_TRIBORD_2][INA3221_CH1] = "/config/TRIBORD/INA3221/2/LINEAR_CH1";
   conf_path_volt[INA3221_TRIBORD_2][INA3221_CH2] = "/config/TRIBORD/INA3221/2/LINEAR_CH2";
   conf_path_volt[INA3221_TRIBORD_2][INA3221_CH3] = "/config/TRIBORD/INA3221/2/LINEAR_CH3";
-  conf_path_volt[INA3221_TRIBORD_3][INA3221_CH1] = "/config/TRIBORD/INA3221/3/LINEAR_CH1";
-  conf_path_volt[INA3221_TRIBORD_3][INA3221_CH2] = "/config/TRIBORD/INA3221/3/LINEAR_CH2";
-  conf_path_volt[INA3221_TRIBORD_3][INA3221_CH3] = "/config/TRIBORD/INA3221/3/LINEAR_CH3";  
   conf_path_engines[ENGINE_BABORD] = "/config/BABORD/EL817/FREQUENCY_RPM";
   conf_path_engines[ENGINE_TRIBORD] = "/config/TRIBORD/EL817/FREQUENCY_RPM";
   conf_path_temp[DS18B20_BABORD_0] = "/config/BABORD/DS18B20/TEMP_BABORD"; 
@@ -233,7 +192,7 @@ void setupSensESPConfig() {
 
 // Setup engine temperature sensors
 void setupTemperatureSensors() {
-  DallasTemperatureSensors* dts = new DallasTemperatureSensors(pin);
+  DallasTemperatureSensors* dts = new DallasTemperatureSensors(DS18B20_PIN);
   
   for (u_int8_t i = 0; i < DS18B20_NB; i++) {
     String config_path_temp = "/config/DS18DB20/" + i;
@@ -282,13 +241,18 @@ void setupVoltageSensors() {
     @link https://github.com/SignalK/SensESP/blob/main/examples/temperature_sender.cpp
   */
   setupSensorINA3221(INA3221_BABORD_0, INA3221_ADDR40_GND);
-  //setupSensorINA3221(INA3221_BABORD_1, INA3221_ADDR41_VCC);
+  //setupSensorINA3221(INA3221_CUVES_1, INA3221_ADDR41_VCC);
   //setupSensorINA3221(INA3221_TRIBORD_2, INA3221_ADDR42_SDA);
-  //setupSensorINA3221(INA3221_TRIBORD_3, INA3221_ADDR43_SCL);
+  //setupSensorINA3221(INA3221_OTHERS_3, INA3221_ADDR43_SCL);
 
   sensor_volt[INA3221_BABORD_0][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH1);
   sensor_volt[INA3221_BABORD_0][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH2);
   sensor_volt[INA3221_BABORD_0][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH3);
+
+  //sensor_volt[INA3221_CUVES_1][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH1);
+  //sensor_volt[INA3221_CUVES_1][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH2);
+  //sensor_volt[INA3221_CUVES_1][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH3);
+
   //sensor_volt[INA3221_TRIBORD_2][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH1);
   //sensor_volt[INA3221_TRIBORD_2][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH2);
   //sensor_volt[INA3221_TRIBORD_2][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH3);
@@ -316,26 +280,52 @@ void setupVoltageSensors() {
   sensor_volt[INA3221_TRIBORD_2][INA3221_CH3]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_TRIBORD_2][INA3221_CH3]));
   */
+
+  /*
+   // Fuel tank volume on portside
+  sensor_volt[INA3221_CUVES_1][INA3221_CH1]
+    ->connect_to(new Linear(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH1]))
+    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH1]));
+  // Fuel tank volume on starboard
+  sensor_volt[INA3221_CUVES_1][INA3221_CH2]
+    ->connect_to(new Linear(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH2]))
+    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH2]));
+  // Water tank volume
+  sensor_volt[INA3221_CUVES_1][INA3221_CH3]
+    ->connect_to(new Linear(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH3]))
+    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH3]));
+  */
 }
 
 // Measure Engines RPM
 void setupRPMSensors() {
   // Step 1 : calibrate the multiplier with known values (CurveInterpolator class) from analog gauge
   const float multiplier = 1.0 / 97.0;
-  //const unsigned int read_rpm_delay = 500;
+  //const float hz_to_rpm = 59.999999999999;
+  const unsigned int read_rpm_delay = 1000;
+  Frequency *freq_babord = new Frequency(multiplier, conf_path_engines[ENGINE_BABORD]);
+  Frequency *freq_tribord = new Frequency(multiplier, conf_path_engines[ENGINE_TRIBORD]);
+  Linear *hz_to_rpm = new Linear(59.999999999999, 0.0);
+  FuelConsumption *rpm_to_lph = new FuelConsumption();
 
   // Step 2 : instanciate DigitalInputCounter from EL817 sensor
-  sensor_engine[ENGINE_BABORD] = new DigitalInputCounter(EL817_BABORD_PIN, INPUT, RISING, read_delay);    // INPUT or INPUT_PULLUP ? (depends on pin)
-  sensor_engine[ENGINE_TRIBORD] = new DigitalInputCounter(EL817_TRIBORD_PIN, INPUT, RISING, read_delay);  // INPUT or INPUT_PULLUP ? (depends on pin)
+  sensor_engine[ENGINE_BABORD] = new DigitalInputCounter(EL817_BABORD_PIN, INPUT, RISING, read_rpm_delay);    // INPUT or INPUT_PULLUP ? (depends on pin)
+  sensor_engine[ENGINE_TRIBORD] = new DigitalInputCounter(EL817_TRIBORD_PIN, INPUT, RISING, read_rpm_delay);  // INPUT or INPUT_PULLUP ? (depends on pin)
 
   // Step 3 : connect the output of sensor to the input of Frequency() and the Signal K output as a float
   sensor_engine[ENGINE_BABORD]
-    ->connect_to(new Frequency(multiplier, conf_path_engines[ENGINE_BABORD]))
-    ->connect_to(new SKOutputInt(sk_path_engines[ENGINE_BABORD][0]));
+    ->connect_to(freq_babord)
+    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_BABORD][REVOLUTIONS]));
 
   sensor_engine[ENGINE_TRIBORD]
-    ->connect_to(new Frequency(multiplier, conf_path_engines[ENGINE_TRIBORD]))
-    ->connect_to(new SKOutputInt(sk_path_engines[ENGINE_TRIBORD][0]));
+    ->connect_to(freq_tribord)
+    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_TRIBORD][REVOLUTIONS]));
+
+// cf time_counter.cpp
+  freq_babord
+    ->connect_to(hz_to_rpm)
+    ->connect_to(rpm_to_lph)
+    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_TRIBORD][FUELRATE]));
 
 }
 
