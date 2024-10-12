@@ -32,7 +32,7 @@
 #include "sensesp_onewire/onewire_temperature.h"
 
 // Temperature sensors DS18B20
-#define DS18B20_PIN 33            // Use ADC1 pin (G32-35) rather than ADC2 pin to avoir Wifi interference
+#define DS18B20_PIN 33            // Use ADC1 pin (G32-35) rather than ADC2 pin to avoid Wifi interference
 #define DS18B20_BABORD_0 0
 #define DS18B20_TRIBORD_1 1
 #define DS18B20_COMMON_2 2
@@ -59,8 +59,6 @@
 
 using namespace sensesp;
 using namespace sensesp::onewire;
-
-typedef enum { ENGINE_OFF = 0, ENGINE_ON, ENGINE_IDLE, ENGINE_RUNNING } engine_state;
 
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
 class FuelConsumption : public CurveInterpolator {
@@ -91,14 +89,16 @@ class FuelConsumption : public CurveInterpolator {
 };
 
 // Engine values structure (float values for Signal-K compatibility)
+/*
 typedef struct {
   uint8_t state;
   uint8_t revolutions;
   uint16_t runTime;
   uint16_t runTimeTrip;
-  //uint16_t startTimeTrip;       // will be calculated by the SK plugin horometer
-  //uint16_t stopTimeTrip;
+  uint16_t startTimeTrip;       // will be calculated by the SK plugin horometer
+  uint16_t stopTimeTrip;
 } engines_data_t;
+*/
 
 // Constants for Signal-K path & ESP config
 const String ssid = "Bbox-75CDA064"; // "BirchwoodTS33"
@@ -118,9 +118,10 @@ const unsigned int read_delay = 2000;
 OneWireTemperature* sensor_temp[DS18B20_NB];                  // 3 DS18B20 Temperature Sensors values
 INA3221 *sensor_INA3221[INA3221_NB];                          // 4 INA3221 Voltage Sensors with 3 channels each
 RepeatSensor<float> *sensor_volt[INA3221_NB][INA3221_CH_NUM]; // 4 Voltage values for each channels
-engines_data_t *engines_data[ENGINE_NB];                      // 2 Engines data
+DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 EL817 RPM Sensors values
+//engines_data_t *engines_data[ENGINE_NB];                      // 2 Engines data
 //JsonDocument engines_data_json[ENGINE_NB];
-DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 Engines values
+
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 //reactesp::ReactESP app;
@@ -169,81 +170,6 @@ String getEngineState(uint8_t rpm, float voltage = 0.0F) {
     state = "running";
 
   return state;
-}
-
-// TODO : remplir la structure des données issues des sondes RPM + Voltage
-/*
-engines_data_t getEngineData() {
-
-}
-*/
-
-/*
-{
-  "context": "vessels.urn:mrn:imo:mmsi:234567890",
-  "updates": [
-    {
-      "source": {
-          "type": "I2C",
-          "label": "I²C Bus #0",
-          "src": "14"
-      },
-      "timestamp": "2010-01-07T07:18:44Z",
-      "values": [
-        {
-          "path": "propulsion.0.revolutions",
-          "value": 16.341667
-        },
-        {
-          "path": "propulsion.0.boostPressure",
-          "value": 45500
-        }
-      ]
-    }
-  ]
-}
-*/
-
-/* @link How to convert a JSON to JsonDocument https://www.liquid-technologies.com/online-json-to-schema-converter
-  TODO :
-  - Envoyer un JSON et le splitter en multiples clés / valeur (path)
-  - Passer à off au bout d'un timeout de 30s (déjà présent dans le plugin signalk-hour-meter)
-
-  sensor_engine[0] = new RepeatSensor<engines_data_t>(read_delay, getEngineData);
-  sensor_engine[1] = new RepeatSensor<engines_data_t>(read_delay, getEngineData);
-  sensor_volt[INA3221_TRIBORD_2]->connect_to(new SKOutputFloat(sk_path_volt[INA3221_TRIBORD_2][INA3221_CH3], "", "V"));
-
-https://signalk.org/SensESP/generated/docs/classsensesp_1_1_s_k_output_raw_json.html#details
-*/
-JsonDocument setupJsonEngine(JsonDocument jsondoc, const u_int8_t engineid = 0) {
-    //String output;
-
-    jsondoc["updates"].to<JsonArray>();
-    JsonObject jsondocupdates = jsondoc["updates"].add<JsonObject>();
-
-    JsonObject jsondocsourcesitems = jsondocupdates["source"].to<JsonObject>();
-    jsondocsourcesitems["label"] = "birchwood-ESP32";
-    jsondocsourcesitems["type"] = "I2C";
-    jsondocsourcesitems["src"] = "14";
-    
-    JsonArray jsondocvaluesarray = jsondocupdates["values"].to<JsonArray>();
-    for (int i = 0; i < ENGINE_SK_PATH_NB ; i++) {
-      JsonObject jsondocvaluesarrayitem = jsondocvaluesarray.add<JsonObject>();
-      jsondocvaluesarrayitem["path"] = sk_path_engines[engineid][i];
-      jsondocvaluesarrayitem["value"] = 0.0;
-    }
-
-    //serializeJsonPretty(jsondoc, output);
-    return jsondoc;
-  
-  //toggler.connect_to(jsonify);
-
-  // print the JSON document to the serial console
-  //jsonify->connect_to(new LambdaConsumer<String>([](String input) {
-  //  ESP_LOGD("Example", "JSONified output: %s", input.c_str());
-  //}));
-  //const char *sk_path = "environment.json.pin15";
-  //jsonify->connect_to(new SKOutputRawJson(sk_path, ""));
 }
 
 // Setup Signal-K paths
