@@ -1,7 +1,8 @@
 /*
   TODO :
   - Tester si les sondes sont présentes et ne pas les attacher à un path signal K le cas échéant (comment le tester ??)
-  - Ajouter un calcul de consommation
+  - Convertir les Litres/heures et m3/s pour Signal-K dans le setupRPMSensors
+  - Ajouter une moyenne de consommation de carburant réelle
   - Ajouter un compteur de chaine (à partir du signal 12V?)
 
   @author B. DIVERCHY
@@ -21,7 +22,7 @@
 //#include "sensesp_app.h"
 #include "sensesp_app_builder.h"
 #include <sensesp/sensors/sensor.h>
-//#include <sensesp/sensors/constant_sensor.h>
+#include <sensesp/sensors/constant_sensor.h>
 #include "sensesp/sensors/digital_input.h"
 //#include "sensesp/sensors/analog_input.h"
 #include "sensesp/signalk/signalk_output.h"
@@ -30,6 +31,8 @@
 #include "sensesp/transforms/curveinterpolator.h"
 #include "sensesp/transforms/frequency.h"
 #include "sensesp_onewire/onewire_temperature.h"
+
+//#include "sensesp/transforms/lambda_transform.h"
 
 // Temperature sensors DS18B20
 #define DS18B20_PIN 33            // Use ADC1 pin (G32-35) rather than ADC2 pin to avoid Wifi interference
@@ -88,7 +91,7 @@ class FuelConsumption : public CurveInterpolator {
   }
 };
 
-enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE };
+enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE, STATE };
 
 // Constants for Signal-K path & ESP config
 const String ssid = "Bbox-75CDA064"; // "BirchwoodTS33"
@@ -107,7 +110,8 @@ const unsigned int read_delay = 2000;
 OneWireTemperature* sensor_temp[DS18B20_NB];                  // 3 DS18B20 Temperature Sensors values
 INA3221 *sensor_INA3221[INA3221_NB];                          // 4 INA3221 Voltage Sensors with 3 channels each
 RepeatSensor<float> *sensor_volt[INA3221_NB][INA3221_CH_NUM]; // 4 Voltage values for each channels
-DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 EL817 RPM Sensors values
+//DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 EL817 RPM Sensors values
+FloatConstantSensor *sensor_engine[ENGINE_NB];
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 //reactesp::ReactESP app;
@@ -121,11 +125,11 @@ reactesp::EventLoop app;
 // @param addr Physical A0 address of the INA3221 sensor
 void setupSensorINA3221(u_int8_t index, ina3221_addr_t addr = INA3221_ADDR40_GND) {
   sensor_INA3221[index] = new INA3221(addr);  // Set I2C default address to 0x40 GND or addr
-  //delay(800);
   sensor_INA3221[index]->begin(&Wire);        // Default shunt resistors = 10 mOhm (R100)
   sensor_INA3221[index]->reset();
+  delay(10);                                  // Wait for the next sensor setup
   #ifdef DEBUG_MODE
-  Serial.printf("Setup Sensor INA3221 completed : ManufID = %i ; DieID = %i\n", sensor_INA3221[index]->getManufID(), sensor_INA3221[index]->getDieID());
+  Serial.printf("Setup Sensor INA3221 0x%X completed : ManufID = %i ; DieID = %i\n", addr, sensor_INA3221[index]->getManufID(), sensor_INA3221[index]->getDieID());
   #endif
 }
 
@@ -161,7 +165,10 @@ void setupSignalKPath() {
   sk_path_volt[INA3221_TRIBORD_2][INA3221_CH3] = "propulsion.tribord.alternatorVoltage"; 
   sk_path_engines[ENGINE_BABORD][REVOLUTIONS] = "propulsion.babord.revolutions";
   sk_path_engines[ENGINE_BABORD][FUELRATE] = "propulsion.babord.fuel.rate";
+  sk_path_engines[ENGINE_BABORD][STATE] = "propulsion.babord.state";
   sk_path_engines[ENGINE_TRIBORD][REVOLUTIONS] = "propulsion.tribord.revolutions";
+  sk_path_engines[ENGINE_TRIBORD][FUELRATE] = "propulsion.tribord.fuel.rate";
+  sk_path_engines[ENGINE_TRIBORD][STATE] = "propulsion.tribord.state";
 }
 
 // Setup SensESP Run-time Config for each Sensor / Linear Class
@@ -242,6 +249,7 @@ void setupVoltageSensors() {
   */
   setupSensorINA3221(INA3221_BABORD_0, INA3221_ADDR40_GND);
   //setupSensorINA3221(INA3221_CUVES_1, INA3221_ADDR41_VCC);
+  setupSensorINA3221(INA3221_CUVES_1, INA3221_ADDR42_SDA);
   //setupSensorINA3221(INA3221_TRIBORD_2, INA3221_ADDR42_SDA);
   //setupSensorINA3221(INA3221_OTHERS_3, INA3221_ADDR43_SCL);
 
@@ -249,9 +257,9 @@ void setupVoltageSensors() {
   sensor_volt[INA3221_BABORD_0][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH2);
   sensor_volt[INA3221_BABORD_0][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH3);
 
-  //sensor_volt[INA3221_CUVES_1][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH1);
-  //sensor_volt[INA3221_CUVES_1][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH2);
-  //sensor_volt[INA3221_CUVES_1][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH3);
+  sensor_volt[INA3221_CUVES_1][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH1);
+  sensor_volt[INA3221_CUVES_1][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH2);
+  sensor_volt[INA3221_CUVES_1][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH3);
 
   //sensor_volt[INA3221_TRIBORD_2][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH1);
   //sensor_volt[INA3221_TRIBORD_2][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH2);
@@ -280,9 +288,8 @@ void setupVoltageSensors() {
   sensor_volt[INA3221_TRIBORD_2][INA3221_CH3]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_TRIBORD_2][INA3221_CH3]));
   */
-
-  /*
-   // Fuel tank volume on portside
+  
+  // Fuel tank volume on portside
   sensor_volt[INA3221_CUVES_1][INA3221_CH1]
     ->connect_to(new Linear(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH1]))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH1]));
@@ -294,39 +301,112 @@ void setupVoltageSensors() {
   sensor_volt[INA3221_CUVES_1][INA3221_CH3]
     ->connect_to(new Linear(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH3]))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH3]));
-  */
+  
 }
+
+// Define the engines transforms to output data to Signal-K in m3/s
+class EngineDataTransform {
+  public :
+    Frequency *freq;
+    Linear *hz_to_rpm;
+    FuelConsumption *rpm_to_lhr;
+    Linear *lhr_to_m3s;
+    EngineDataTransform(float multiplier, uint8_t engineID) { 
+        freq = new Frequency(multiplier, conf_path_engines[engineID]);
+        hz_to_rpm = new Linear(59.999999999999, 0.0);           // Hertz (Hz) to Revolutions Per Minute (RPM)
+        rpm_to_lhr = new FuelConsumption();                     // RPM to Liter per Hour (l/hr)
+        lhr_to_m3s = new Linear(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
+      }
+};
+
 
 // Measure Engines RPM
 void setupRPMSensors() {
   // Step 1 : calibrate the multiplier with known values (CurveInterpolator class) from analog gauge
-  const float multiplier = 1.0 / 97.0;
-  //const float hz_to_rpm = 59.999999999999;
+  //const float multiplier = 1.0 / 97.0;
+  const float multiplier = 1.0;
   const unsigned int read_rpm_delay = 1000;
-  Frequency *freq_babord = new Frequency(multiplier, conf_path_engines[ENGINE_BABORD]);
-  Frequency *freq_tribord = new Frequency(multiplier, conf_path_engines[ENGINE_TRIBORD]);
-  Linear *hz_to_rpm = new Linear(59.999999999999, 0.0);
-  FuelConsumption *rpm_to_lph = new FuelConsumption();
+  EngineDataTransform *engine_babord = new EngineDataTransform(multiplier, ENGINE_BABORD);
+  EngineDataTransform *engine_tribord = new EngineDataTransform(multiplier, ENGINE_TRIBORD);
 
   // Step 2 : instanciate DigitalInputCounter from EL817 sensor
+  #ifndef DEBUG_MODE
   sensor_engine[ENGINE_BABORD] = new DigitalInputCounter(EL817_BABORD_PIN, INPUT, RISING, read_rpm_delay);    // INPUT or INPUT_PULLUP ? (depends on pin)
   sensor_engine[ENGINE_TRIBORD] = new DigitalInputCounter(EL817_TRIBORD_PIN, INPUT, RISING, read_rpm_delay);  // INPUT or INPUT_PULLUP ? (depends on pin)
+  #else
+  sensor_engine[ENGINE_BABORD] = new FloatConstantSensor(50.0, 1, "/config/BABORD/EL817/CONSTANT");   // Fake sensor for test purpose
+  sensor_engine[ENGINE_TRIBORD] = new FloatConstantSensor(60.0, 1, "/config/TRIBORD/EL817/CONSTANT"); // Fake sensor for test purpose
+  #endif
 
-  // Step 3 : connect the output of sensor to the input of Frequency() and the Signal K output as a float
+  // Step 3 : connect the output of sensor to the input of Frequency() and the Signal K output as a float in Hz
   sensor_engine[ENGINE_BABORD]
-    ->connect_to(freq_babord)
+    ->connect_to(engine_babord->freq)
     ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_BABORD][REVOLUTIONS]));
 
   sensor_engine[ENGINE_TRIBORD]
-    ->connect_to(freq_tribord)
+    ->connect_to(engine_tribord->freq)
     ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_TRIBORD][REVOLUTIONS]));
 
+// Step 4 : transforms the output of Frequency to RPM and Liter per hour from FuelConsomption - cf time_counter.cpp
+  engine_babord->freq
+    ->connect_to(engine_babord->hz_to_rpm)
+    ->connect_to(engine_babord->rpm_to_lhr)
+    ->connect_to(engine_babord->lhr_to_m3s)
+    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_BABORD][FUELRATE]));
+    //new SKMetadata("L/Hr", "Liters per hour", "Fuel rate of consumption")));
+    //const String& units, const String& display_name, const String& description, const String& short_name,float timeout)
+
+  JsonDocument jsondoc;
+  JsonArray jsondoczones = jsondoc["zones"].to<JsonArray>();
+  JsonObject jsondoczones1 = jsondoczones.add<JsonObject>();
+  jsondoczones1["upper"] = 4;
+  jsondoczones1["state"] = "alarm";
+  jsondoczones1["message"] = "Stopped or very slow";
+  JsonObject jsondoczones2 = jsondoczones.add<JsonObject>();
+  jsondoczones2["lower"] = 4;
+  jsondoczones2["upper"] = 60;
+  jsondoczones2["state"] = "normal";
+
+
+/* https://signalk.org/specification/1.7.0/doc/data_model_metadata.html
+  {
+    "displayName": "Port Tachometer",
+    "longName": "Engine 2 Tachometer",
+    "shortName": "Tacho",
+    "description": "Engine revolutions (x60 for RPM)",
+    "units": "Hz",
+    "timeout": 1,
+    "displayScale": {"lower": 0, "upper": 75, "type": "linear"},
+    "alertMethod": ["visual"],
+    "warnMethod": ["visual"],
+    "alarmMethod": ["sound", "visual"],
+    "emergencyMethod": ["sound", "visual"],
+    "zones": [
+      {"upper": 4, "state": "alarm", "message": "Stopped or very slow"},
+      {"lower": 4, "upper": 60, "state": "normal"},
+      {"lower": 60, "upper": 65, "state": "warn", "message": "Approaching maximum"},
+      {"lower": 65, "state": "alarm", "message": "Exceeding maximum"}
+    ]
+  }
+
+| State/Zone | Description |
+|------------|--------|--------| 
+| nominal | this is a special type of normal state/zone (see below) | 
+| normal | the normal operating range for the value in question (default) | 
+| alert | Indicates a safe or normal condition which is brought to the operators attention to impart information for routine action purposes | 
+| warn | Indicates a condition that requires immediate attention but not immediate action | 
+| alarm | Indicates a condition which is outside the specified acceptable range. Immediate action is required to prevent loss of life or equipment damage | 
+| emergency | the value indicates a life-threatening condition |
+*/
+
 // cf time_counter.cpp
-  freq_babord
-    ->connect_to(hz_to_rpm)
-    ->connect_to(rpm_to_lph)
+  engine_tribord->freq
+    ->connect_to(engine_tribord->hz_to_rpm)
+    ->connect_to(engine_tribord->rpm_to_lhr)
+    ->connect_to(engine_tribord->lhr_to_m3s)
     ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_TRIBORD][FUELRATE]));
 
+// Step 5 : change the state if needed
 }
 
 // The setup function performs one-time application initialization.
@@ -349,7 +429,7 @@ void setup() {
   setupSensESPConfig();
   setupTemperatureSensors();
   setupVoltageSensors();
-  //setupRPMSensors();
+  setupRPMSensors();
 }
 
 // The loop function is called in an endless loop during program execution.
@@ -357,22 +437,6 @@ void setup() {
 void loop() { 
   static auto event_loop = SensESPBaseApp::get_event_loop();
   event_loop->tick();
-
-  //JsonDocument jsondoc_engine_1;
-  //String output = setupJsonEngine(jsondoc_engine_1, ENGINE_BABORD);
-  //Serial.println(output);
-
-  //const char *sk_path_engine = "environment.json.pin15";
-  //JsonDocument jsondoc_engine_1;
-  //JsonDocument output = setupJsonEngine(jsondoc_engine_1, ENGINE_BABORD);
-  //String jsonify;
-  //serializeJsonPretty(output, jsonify);
-  //Serial.print("JSON :");
-  //Serial.println(jsonify);
-  //ConstantSensor<JsonDocument> *sensor_engine = new ConstantSensor<JsonDocument>(jsondoc_engine_1);
-  //sensor_engine->connect_to(new SKOutputRawJson(sk_path_engine));
-  //SKRequest *sk_request = new SKRequest();
-  //sk_request->send_request(jsondoc_engine_1, skRequestCallback);
 
   delay(2000);
 }
