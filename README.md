@@ -3,6 +3,19 @@
 This is the ESP32 part of the project to digitize Volvo Penta TAMD40 marine engine.
 It is sized to fit with 2 TAMD engines (portside and starboard) but can easily be restricted to only one.
 
+## FEATURES
+  Digital dashboard :
+  - Coolant temperature
+  - Oil pressure
+  - Voltage
+  - RPM gauge
+  - Fuel consumption  
+  - Windlass chain counter (persistent)
+  - Fuel tank level
+  - Fresh water tank level
+  - Exhaust temperature
+  - Bilge temperature
+
 ## WHAT YOU NEED
 ### MUST-HAVE
 - ESP32 Wroom32
