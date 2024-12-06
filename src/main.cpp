@@ -2,13 +2,13 @@
   TODO :
   P0
   - Utiliser un MovingAverage sur la valeur RPM
+  - Debugger l'instanciation du ReefwingMPU
   
   P1
   - Ajouter une moyenne de consommation de carburant réelle
   - Ajouter un capteur d'assiette MPU 9250 / 6500
 
   P2
-  - Ajouter un compteur de chaine (à partir du signal 12V) + sauvegarde de la valeur persistante
   - Surcharger la classe SKMetaData pour envoyer les données de zones
   - Migrer vers SensEsp v3 release 
       ConfigItem(frequency)
@@ -58,6 +58,7 @@
 #include <sensesp_onewire/onewire_temperature.h>
 #include <string>
 #include <ReefwingMPU6050.h>
+//#include "classes.h"
 
 // Temperature sensors DS18B20
 #define DS18B20_PIN 33            // Use ADC1 pin (GPIO32-35) rather than ADC2 pin to avoid Wifi interference
@@ -85,8 +86,7 @@
 
 // Windlass Chain counter
 #define CHAIN_COUNTER_PIN 32
-#define WINDLASS_GO_DOWN_PIN 12
-#define WINDLASS_GO_UP_PIN 13
+#define CHAIN_COUNTER_SAVE_TIMER 10
 
 // Use Debug Mode for verbose logs and Fake Mode to simulate RPM data
 #define DEBUG_MODE 1
@@ -137,6 +137,13 @@ const String conf_path_chain = "/CONFIG/CHAINE/COUNTER";
 const String conf_path_motion = "/CONFIG/MOTION";
 const float gipsy_circum = 0.43982;                           // Windlass gipsy circumference
 const unsigned int read_delay = 1000;                         // Sensors read delay = 1s
+static const char PINTEGRATOR_SCHEMA[] PROGMEM = R"({
+    "type": "object",
+    "properties": {
+        "k": { "title": "Multiplier", "type": "number" },
+        "value": { "title": "Value", "type": "number" }
+    }
+  })";
 
 // Temperature & Voltage sensors
 OneWireTemperature* sensor_temp[DS18B20_NB];                  // 3 DS18B20 Temperature values
@@ -148,12 +155,14 @@ DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 PC817 RPM Sen
 FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake values
 #endif
 DigitalInputCounter *sensor_windlass;                         // Windlass sensor
-Integrator<int, float> *chain_counter;                        // Windlass chain counter
+
 JsonDocument jdoc_conf_windlass;
-JsonObject conf_windlass_direction;                           // Windlass direction of rotation (UP or DOWN)
-ReefwingMPU6050 *sensor_mpu;                                 // 1 MPU-6050 Motion sensor
-RepeatSensor<String> *sensor_motion;                           // MPU Motion values
-SKAttitudeVector attitude_vector;
+JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
+unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
+boolean chain_counter_saved = true;                           // Trigger to save chain counter new value
+ReefwingMPU6050 *sensor_mpu;                                  // 1 MPU-6050 Motion sensor
+RepeatSensor<String> *sensor_motion;                          // MPU Motion values
+SKAttitudeVector attitude_vector;                             // Vector for roll, pitch and yaw values (SensESP < 3.0.0)
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
@@ -268,6 +277,47 @@ class EngineDataTransform {
       }
 };
 
+// Override Integrator class with persistent last value and k multiplier configuration
+class PersistentIntegrator : public Transform<int, float> {
+  public:
+  PersistentIntegrator(float gipsy_circum = 1.0, float value = 0.0, const String& config_path = "")
+     : Transform<int, float>(config_path), k{k}, value{value} {
+      this->load_configuration();
+      this->emit(value);
+  }
+
+  void set(const int& input) {
+    value += input * k;
+    this->emit(value);
+  }
+
+  void reset() { value = 0.0; k = 1.0; }
+
+  virtual void get_configuration(JsonObject& doc) override final {
+    doc["k"] = k;
+    doc["value"] = value;
+  }
+
+  virtual bool set_configuration(const JsonObject& config) override final {
+    if (!config["k"].is<float>()) {
+        return false;
+      }
+    k = config["k"];
+    value = (config["value"].is<float>() ? config["value"] : 0.0);    // May not have a value at the first load
+
+    return true;
+  }
+  virtual String get_config_schema() override {
+    return FPSTR(PINTEGRATOR_SCHEMA);
+  }
+
+ private:
+  float k;
+  float value = 0.0;
+};
+
+PersistentIntegrator *chain_counter;              // Windlass chain counter
+
 // Setup the INA3221 volt sensors
 // The INA3221 must have an I²C address on A0 pin, solder the right pin GND (0x40) / SDA (0x41) / SCL (0x42) / VS (0x43)
 // - On a Raspberry Pi, the I²C bus is required to be enabled
@@ -298,49 +348,94 @@ float getVoltageINA3221_TRIBORD2_CH2() { return sensor_INA3221[INA3221_TRIBORD_2
 float getVoltageINA3221_TRIBORD2_CH3() { return sensor_INA3221[INA3221_TRIBORD_2]->getVoltage(INA3221_CH3); }  // Voltage
 float getVoltageINA3221_OTHERS3_CH3() { return sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH3); }    // Radius Angle
 
+/* Callbacks for Windlass UP/DOWN buttons sensor
+   This function determines :
+   - In which direction the windlass turns (UP or DOWN)
+   - Whether the last value should be saved (persistent storage)
+
+   The direction UP (or DOWN) is derived from the voltage of each push button / relay
+   Once we know the direction, we can change the sign (+/-) of the chain_counter accumulator
+   It is not necessary to change it each time the button is pressed : only when the direction is reversed.
+   
+   We use the Repeat Sensor to arm a timer that saves the last chain_counter value after CHAIN_COUNTER_SAVE_TIMER cycles.
+   To avoid infinite increment of the timer when there is no UP/DOWN event and multiples saves, the timer is set to 0 
+   when the last value has already been saved.
+
+   NOTE(1) : if the global read_delay is set to more or less than one second, the number of cycles may need to be modified.
+   NOTE(2) : only one function needs to trigger the timer and the save_configuration() funcion
+
+   @returns float - Voltage measured for the channel INA3221_CHx
+*/
 float getVoltageINA3221_OTHERS3_CH1() { 
   float up = sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH1);                                        // Windlass UP
-  bool set_config = false;
-  if ((up > 0.0) && (conf_windlass_direction["k"] > 0)) {
-    conf_windlass_direction["k"] = -1.0 * conf_windlass_direction["k"].as<float>();               // Inverse direction
-    set_config = chain_counter->set_configuration(conf_windlass_direction);
+
+  if ((up > 0.0) && (conf_windlass["k"] > 0)) {
+    conf_windlass["k"] = -1.0 * conf_windlass["k"].as<float>();               // Reverse direction
+    bool set_config = chain_counter->set_configuration(conf_windlass);
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : UP ; SET_CONFIG = %s\n", set_config ? "true" : "false");
     #endif
   }
-  #ifdef DEBUG_MODE
+  else if ((chain_counter_saved == false) && (chain_counter_timer == CHAIN_COUNTER_SAVE_TIMER)) {
+      chain_counter->save_configuration();                                                        // Save last value to local file system
+      chain_counter_timer = 0;
+      chain_counter_saved = true;
+
+      #ifdef DEBUG_MODE
+      Serial.printf("WINDLASS : UP NOK -> saved = %s\n", chain_counter_saved ? "true" : "false");
+      #endif
+    }
   else {
-  String jsonify;
-  serializeJsonPretty(conf_windlass_direction, jsonify);
-  Serial.print("JSON :");
-  Serial.println(jsonify);
-  Serial.printf("WINDLASS : UP NOK -> up = %f direction = %f\n", up, conf_windlass_direction["k"]);
+    chain_counter_timer = ((chain_counter_saved == true) ? 0 : (chain_counter_timer + 1));        // Avoir infinite increment without changes
+
+    #ifdef DEBUG_MODE
+    //String jsonify;
+    //serializeJsonPretty(conf_windlass_direction, jsonify);
+    //Serial.print("JSON :");
+    //Serial.println(jsonify);
+    Serial.printf("WINDLASS : UP NOK -> up = %f direction = %f timer = %i saved = %s\n", up, 
+                  conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
+    #endif
   }
-  #endif
 
   return up;
 }
 
 float getVoltageINA3221_OTHERS3_CH2() { 
   float down = sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH2);                                      // Windlass DOWN
-  bool set_config = false;  
-  if ((down > 0.0) && (conf_windlass_direction["k"] < 0)) {
-    conf_windlass_direction["k"] = -1.0 * conf_windlass_direction["k"].as<float>();               // Inverse direction
-    set_config = chain_counter->set_configuration(conf_windlass_direction);
+  
+  if ((down > 0.0) && (conf_windlass["k"] < 0)) {
+    conf_windlass["k"] = -1.0 * conf_windlass["k"].as<float>();               // Reverse direction
+    bool set_config = chain_counter->set_configuration(conf_windlass);
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : DOWN ; SET_CONFIG = %s\n", set_config ? "true" : "false");
     #endif
   }
-  #ifdef DEBUG_MODE
   else {
-  Serial.printf("WINDLASS : DOWN NOK -> down = %f direction = %f\n", down, conf_windlass_direction["k"]);
-  String jsonify;
-  serializeJsonPretty(conf_windlass_direction, jsonify);
-  Serial.print("JSON :");
-  Serial.println(jsonify);
+    #ifdef DEBUG_MODE
+    Serial.printf("WINDLASS : DOWN NOK -> down = %f direction = %f\n", down, conf_windlass["k"].as<float>());
+    //String jsonify;
+    //serializeJsonPretty(conf_windlass_direction, jsonify);
+    //Serial.print("JSON :");
+    //Serial.println(jsonify);
+    #endif
   }
-  #endif
+
   return down;
+}
+
+// Callback for chain counter
+// This function is called after each sensor_windlass value changes
+// TODO : Ajouter un contrôle de la valeur avec CHAIN_LIMIT_LOW et CHAIN_LIMIT HIGH ?
+void handleChainCounterChange() {
+  if (sensor_windlass->get() > 0) {
+    chain_counter_saved = false;          // Set the last value status to 'not saved'
+    chain_counter_timer = 0;              // Arm a timer to save chain counter last value after CHAIN_COUNTER_SAVE_TIMER cycles
+
+    #ifdef DEBUG_MODE
+    Serial.println("WINDLASS : NEW VALUE TO SAVE");
+    #endif
+  }
 }
 
 String getMotionSensorValues() {
@@ -510,17 +605,17 @@ void setupVoltageTankSensors(float Vin, float R1) {
 
 // Windlass chain counter
 void setupVoltageChainSensors() {
-  conf_windlass_direction = jdoc_conf_windlass.to<JsonObject>();
-  conf_windlass_direction["k"] = gipsy_circum;                                                    // Default direction = UP
-  chain_counter = new Integrator<int, float>(gipsy_circum, 0.0, conf_path_chain);
+  conf_windlass = jdoc_conf_windlass.to<JsonObject>();
+  conf_windlass["k"] = gipsy_circum;                                                              // Default direction = UP
+  chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, conf_path_chain);                   // Chain counter in meter
   sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, RISING, read_delay); // ou INPUT_PULLDOWN si positif ?
-  chain_counter->get_configuration(conf_windlass_direction);
+  chain_counter->get_configuration(conf_windlass);                                                // Retrieve last saved value if exists
   
   auto *sensor_windlass_counter = sensor_windlass->connect_to(chain_counter);
+  sensor_windlass_counter->attach(handleChainCounterChange);                                      // Set a callback for each value read
   sensor_windlass_counter
   ->connect_to(new SKOutputFloat(sk_path_windlass, 
                 new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));
-  //sensor_windlass_counter->connect_to(new PersistingObservableValue<float>(0.0, conf_path_chain + "LAST_VALUE"));
 
   #ifdef DEBUG_MODE
   sensor_windlass->connect_to(new SKOutputFloat(sk_path_windlass + ".raw"));
@@ -739,13 +834,15 @@ void setupRPMSensors() {
 // Motion Sensor
 // @link https://github.com/Reefwing-Software/Reefwing-MPU6050
 void setupMotionSensor() {
+  Serial.print("Instanciate ReefwingMPU..");
   sensor_mpu = new ReefwingMPU6050();
+  Serial.println("DONE");
 
   if (!sensor_mpu->begin())
     Serial.println("Failed to find MPU6050 chip");
   
   if (sensor_mpu->connected()) {
-    Serial.println("MPU6050 IMU Connected."); 
+    Serial.println("MPU6050 IMU Connected.");
 
     //  Set sensitivity threshold (default) and calibrate
     sensor_mpu->setThreshold(3);
@@ -762,6 +859,7 @@ void setupMotionSensor() {
     Serial.println("MPU6050 IMU Not Detected.");
     //while(1);
   }
+  Serial.println("END OF SETUP");
 }
 
 
@@ -784,6 +882,7 @@ void setup() {
   //setupTemperatureSensors();
   setupVoltageSensors();
   //setupRPMSensors();
+  //delay(2000);
   //setupMotionSensor();
 }
 
