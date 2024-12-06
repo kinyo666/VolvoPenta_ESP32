@@ -29,8 +29,8 @@
   - Bilge temperature
 
   @author kinyo666
-  @version 1.0.3
-  @date 03/12/2024
+  @version 1.0.4
+  @date 06/12/2024
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
   @link Based on https://github.com/Boatingwiththebaileys/ESP32-code
@@ -58,7 +58,7 @@
 #include <sensesp_onewire/onewire_temperature.h>
 #include <string>
 #include <ReefwingMPU6050.h>
-//#include "classes.h"
+#include "customClasses.h"
 
 // Temperature sensors DS18B20
 #define DS18B20_PIN 33            // Use ADC1 pin (GPIO32-35) rather than ADC2 pin to avoid Wifi interference
@@ -105,11 +105,7 @@ struct SKAttitudeVector {                           // Defined in SensESP v3.0.1
       : roll(roll), pitch(pitch), yaw(yaw) {}
 };
 
-// Constants for Signal-K path & ESP config
-const String ssid = "Bbox-75CDA064"; // "BirchwoodTS33"
-const String password = "5DDF31AF4C1FD577";
-//const String signalkip = "192.168.1.57";
-//const int signalkport = 3000;
+// Constants for Signal-K path & ESP configuration
 const String sk_path_temp[DS18B20_NB] = {
         "propulsion.babord.exhaustTemperature",
         "propulsion.tribord.exhaustTemperature",
@@ -137,13 +133,6 @@ const String conf_path_chain = "/CONFIG/CHAINE/COUNTER";
 const String conf_path_motion = "/CONFIG/MOTION";
 const float gipsy_circum = 0.43982;                           // Windlass gipsy circumference
 const unsigned int read_delay = 1000;                         // Sensors read delay = 1s
-static const char PINTEGRATOR_SCHEMA[] PROGMEM = R"({
-    "type": "object",
-    "properties": {
-        "k": { "title": "Multiplier", "type": "number" },
-        "value": { "title": "Value", "type": "number" }
-    }
-  })";
 
 // Temperature & Voltage sensors
 OneWireTemperature* sensor_temp[DS18B20_NB];                  // 3 DS18B20 Temperature values
@@ -155,7 +144,7 @@ DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 PC817 RPM Sen
 FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake values
 #endif
 DigitalInputCounter *sensor_windlass;                         // Windlass sensor
-
+PersistentIntegrator *chain_counter;                          // Windlass chain counter
 JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
@@ -167,6 +156,7 @@ SKAttitudeVector attitude_vector;                             // Vector for roll
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
 
+/*
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
 class FuelConsumption : public CurveInterpolator {
  public:
@@ -242,22 +232,6 @@ class LinearPositive : public LambdaTransform<float, float, float, float> {
   static const ParamInfo param_info_[];
 };
 
-float (*LinearPositive::function_)(float, float, float) =
-    [](float input, float multiplier, float offset) {
-      if (input > 0)
-        return multiplier * input + offset;
-      else
-        return (0.0f);
-    };
-
-const ParamInfo LinearPositive::param_info_[] = {{"multiplier", "Multiplier"}, {"offset", "Offset"}};
-
-// Filter Kelvin values out of range
-auto filterKelvinValues = [](float input, float offset = 273.15, float max = 413.1) -> float {
-    return ((((input - offset) > 0) && (input < max)) ? input : offset);
-};
-
-const ParamInfo* filterKelvinValues_ParamInfo = new ParamInfo[2]{{"offset", "Offset"}, {"max", "Max value"}};
 
 // Define the engines transform to output data to Signal-K
 class EngineDataTransform {
@@ -268,8 +242,8 @@ class EngineDataTransform {
     LinearPositive *lhr_to_m3s;
     MovingAverage *moving_avg;
 
-    EngineDataTransform(float multiplier, uint8_t engineID) { 
-        freq = new Frequency(multiplier, conf_path_engines[engineID]);
+    EngineDataTransform(float multiplier, String conf_path_engine) { 
+        freq = new Frequency(multiplier, conf_path_engine);
         hz_to_rpm = new Linear(60, 0.0);                                // Hertz (Hz) to Revolutions Per Minute (RPM)
         rpm_to_lhr = new FuelConsumption();                             // RPM to Liter per Hour (l/hr)
         lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
@@ -315,8 +289,25 @@ class PersistentIntegrator : public Transform<int, float> {
   float k;
   float value = 0.0;
 };
+*/
 
-PersistentIntegrator *chain_counter;              // Windlass chain counter
+float (*LinearPositive::function_)(float, float, float) =
+    [](float input, float multiplier, float offset) {
+      if (input > 0)
+        return multiplier * input + offset;
+      else
+        return (0.0f);
+    };
+
+const ParamInfo LinearPositive::param_info_[] = {{"multiplier", "Multiplier"}, {"offset", "Offset"}};
+
+// Filter Kelvin values out of range
+auto filterKelvinValues = [](float input, float offset = 273.15, float max = 413.1) -> float {
+    return ((((input - offset) > 0) && (input < max)) ? input : offset);
+};
+
+const ParamInfo* filterKelvinValues_ParamInfo = new ParamInfo[2]{{"offset", "Offset"}, {"max", "Max value"}};
+
 
 // Setup the INA3221 volt sensors
 // The INA3221 must have an I²C address on A0 pin, solder the right pin GND (0x40) / SDA (0x41) / SCL (0x42) / VS (0x43)
@@ -389,10 +380,6 @@ float getVoltageINA3221_OTHERS3_CH1() {
     chain_counter_timer = ((chain_counter_saved == true) ? 0 : (chain_counter_timer + 1));        // Avoir infinite increment without changes
 
     #ifdef DEBUG_MODE
-    //String jsonify;
-    //serializeJsonPretty(conf_windlass_direction, jsonify);
-    //Serial.print("JSON :");
-    //Serial.println(jsonify);
     Serial.printf("WINDLASS : UP NOK -> up = %f direction = %f timer = %i saved = %s\n", up, 
                   conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
     #endif
@@ -414,10 +401,6 @@ float getVoltageINA3221_OTHERS3_CH2() {
   else {
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : DOWN NOK -> down = %f direction = %f\n", down, conf_windlass["k"].as<float>());
-    //String jsonify;
-    //serializeJsonPretty(conf_windlass_direction, jsonify);
-    //Serial.print("JSON :");
-    //Serial.println(jsonify);
     #endif
   }
 
@@ -774,8 +757,8 @@ SKMetadata getEnginesSKMetadata() {
   return *engine_skmeta;
 }
 
-// Measure Engines RPM
-/*
+/* Measure Engines RPM
+
   multiplier_port and multiplier_starboard needs to be adjusted based on flywheel to Alternator W ratio.
   Example: 1 turn on an AQAD41 makes 2.45 turns on the Alternator, and the Alternator has 6 poles which makes a total of 2.45 x 6 = 14.7 Hz per turn. SignalK needs info in Hz so we need to divide the incoming value with 14.7, or as in our case multiply with (1/14.7) = 0,06803
   If Ratio is unknown, the original Tachometer might have a max Impulses/min written on it, divide that with max rpm on the meter and you'll get the ratio. Tachometer 860420 is marked with 73500Imp/min and has a scale to 5000rpm. 73500 divided with 5000 equals 14,7, Tada!
@@ -788,8 +771,8 @@ void setupRPMSensors() {
   const float multiplier = 1.0;
   const unsigned int read_rpm_delay = 1000;
 
-  EngineDataTransform *engine_babord = new EngineDataTransform(multiplier, ENGINE_BABORD);
-  EngineDataTransform *engine_tribord = new EngineDataTransform(multiplier, ENGINE_TRIBORD);
+  EngineDataTransform *engine_babord = new EngineDataTransform(multiplier, conf_path_engines[ENGINE_BABORD]);
+  EngineDataTransform *engine_tribord = new EngineDataTransform(multiplier, conf_path_engines[ENGINE_TRIBORD]);
 
   // Step 2 : instanciate DigitalInputCounter to read PC817 sensor values
   #ifndef FAKE_MODE
@@ -862,7 +845,6 @@ void setupMotionSensor() {
   Serial.println("END OF SETUP");
 }
 
-
 // The setup function performs one-time application initialization.
 void setup() {
   #ifdef DEBUG_MODE
@@ -874,10 +856,7 @@ void setup() {
 
   // Create the global SensESPApp() object.
   SensESPAppBuilder builder;
-  sensesp_app = builder.set_hostname("birchwood-ESP32")
-                    ->get_app();
-//                ->set_sk_server(signalkip, signalkport)
-//                  ->set_wifi(ssid, password)
+  sensesp_app = builder.set_hostname("birchwood-ESP32")->get_app();
 
   //setupTemperatureSensors();
   setupVoltageSensors();
