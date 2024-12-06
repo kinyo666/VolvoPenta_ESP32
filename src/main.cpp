@@ -21,7 +21,7 @@
   - Oil pressure
   - Voltage
   - RPM gauge
-  - Fuel consumption  
+  - Fuel consumption
   - Windlass chain counter (persistent)
   - Fuel tank level
   - Fresh water tank level
