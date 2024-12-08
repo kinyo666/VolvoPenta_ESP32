@@ -10,11 +10,6 @@
 
   P2
   - Surcharger la classe SKMetaData pour envoyer les données de zones
-  - Migrer vers SensEsp v3 release 
-      ConfigItem(frequency)
-        ->set_title("Frequency")
-        ->set_description("Frequency of the engine RPM signal")
-        ->set_sort_order(1000);
 
   Volvo Penta digital dashboard :
   - Coolant temperature
@@ -29,7 +24,7 @@
   - Bilge temperature
 
   @author kinyo666
-  @version 1.0.4
+  @version 1.0.5
   @date 08/12/2024
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -49,7 +44,7 @@
 #include <sensesp/sensors/digital_input.h>
 #include <sensesp/signalk/signalk_output.h>
 #include <sensesp_onewire/onewire_temperature.h>
-#include <string>
+//#include <string>
 #include <ReefwingMPU6050.h>
 #include "customClasses.h"
 
@@ -80,7 +75,7 @@
 // Windlass Chain counter
 #define CHAIN_COUNTER_PIN 32
 #define CHAIN_COUNTER_SAVE_TIMER 10
-#define CHAIN_COUNTER_IGNORE_DELAY 20
+#define CHAIN_COUNTER_IGNORE_DELAY 50
 #define CHAIN_COUNTER_PATH 0
 #define CHAIN_COUNTER_DELAY 1
 #define CHAIN_COUNTER_NB 2
@@ -88,6 +83,13 @@
 // Use Debug Mode for verbose logs and Fake Mode to simulate RPM data
 #define DEBUG_MODE 1
 //#define FAKE_MODE 1
+
+// SensESP UI Config order
+#define UI_ORDER_TEMP 10
+#define UI_ORDER_ENGINE 20
+#define UI_ORDER_TANK 30
+#define UI_ORDER_CHAIN 40
+#define UI_ORDER_MOTION 50
 
 using namespace sensesp;
 using namespace sensesp::onewire;
@@ -102,7 +104,7 @@ struct SKAttitudeVector {                           // Backwards compatibility f
       : roll(roll), pitch(pitch), yaw(yaw) {}
 };
 
-// Constants for Signal-K path & ESP configuration
+// Constants for Signal-K path
 const String sk_path_temp[DS18B20_NB] = {
         "propulsion.babord.exhaustTemperature",
         "propulsion.tribord.exhaustTemperature",
@@ -116,6 +118,8 @@ const String sk_path_engines[ENGINE_NB][ENGINE_SK_PATH_NB] = {
         {"propulsion.tribord.revolutions",  "propulsion.tribord.fuel.rate", "propulsion.tribord.state"}};
 const String sk_path_windlass = "navigation.anchor.rodeDeployed";
 const String sk_path_motion = "navigation.attitude";
+
+// Constants for SensESP Configuration
 const String conf_path_temp[DS18B20_NB] = {
         "/CONFIG/BABORD/DS18B20/TEMP_BABORD", 
         "/CONFIG/TRIBORD/DS18B20/TEMP_TRIBORD",
@@ -140,9 +144,8 @@ DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 PC817 RPM Sen
 #else
 FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake values
 #endif
-DigitalInputCounter *sensor_windlass;                         // Windlass sensor
+Transform<int, int> *sensor_windlass_debounce;                // Windlass sensor (DigitalInputCounter + Debounce)
 PersistentIntegrator *chain_counter;                          // Windlass chain counter
-Transform<int, int> *sensor_windlass_debounce;                               // 
 JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
@@ -221,26 +224,26 @@ float getVoltageINA3221_OTHERS3_CH3() { return sensor_INA3221[INA3221_OTHERS_3]-
    @returns float - Voltage measured for the channel INA3221_CHx
 */
 float getVoltageINA3221_OTHERS3_CH1() { 
-  float up = sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH1);                                        // Windlass UP
+  float up = sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH1);                     // Windlass UP
 
   if ((up > 0.0) && (conf_windlass["k"] > 0)) {
-    conf_windlass["k"] = -1.0 * conf_windlass["k"].as<float>();               // Reverse direction
-    bool set_config = chain_counter->set_configuration(conf_windlass);
+    conf_windlass["k"] = -1.0 * conf_windlass["k"].as<float>();                             // Reverse direction
+    bool set_config = chain_counter->from_json(conf_windlass);
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : UP ; SET_CONFIG = %s\n", set_config ? "true" : "false");
     #endif
   }
   else if ((chain_counter_saved == false) && (chain_counter_timer == CHAIN_COUNTER_SAVE_TIMER)) {
-      chain_counter->save_configuration();                                                        // Save last value to local file system
-      chain_counter_timer = 0;
-      chain_counter_saved = true;
+      chain_counter_saved = chain_counter->save();                                          // Save last value to local file system
+      if (chain_counter_saved)
+        chain_counter_timer = 0;                                                            // Reset timer to 0
 
       #ifdef DEBUG_MODE
       Serial.printf("WINDLASS : UP NOK -> saved = %s\n", chain_counter_saved ? "true" : "false");
       #endif
     }
   else {
-    chain_counter_timer = ((chain_counter_saved == true) ? 0 : (chain_counter_timer + 1));        // Avoir infinite increment without changes
+    chain_counter_timer = ((chain_counter_saved == true) ? 0 : (chain_counter_timer + 1));  // Avoid infinite increment without changes
 
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : UP NOK -> up = %f direction = %f timer = %i saved = %s\n", up, 
@@ -252,11 +255,11 @@ float getVoltageINA3221_OTHERS3_CH1() {
 }
 
 float getVoltageINA3221_OTHERS3_CH2() { 
-  float down = sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH2);                                      // Windlass DOWN
+  float down = sensor_INA3221[INA3221_OTHERS_3]->getVoltage(INA3221_CH2);                   // Windlass DOWN
   
   if ((down > 0.0) && (conf_windlass["k"] < 0)) {
-    conf_windlass["k"] = -1.0 * conf_windlass["k"].as<float>();               // Reverse direction
-    bool set_config = chain_counter->set_configuration(conf_windlass);
+    conf_windlass["k"] = -1.0 * conf_windlass["k"].as<float>();                             // Reverse direction
+    bool set_config = chain_counter->from_json(conf_windlass);
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : DOWN ; SET_CONFIG = %s\n", set_config ? "true" : "false");
     #endif
@@ -326,23 +329,38 @@ void setupTemperatureSensors() {
   for (u_int8_t i = 0; i < DS18B20_NB; i++) {
     String config_path_temp = "/CONFIG/DS18B20/SONDE_" + String(std::to_string(i).c_str());
     sensor_temp[i] = new OneWireTemperature(dts, read_delay, config_path_temp);
-    sensor_temp[i]->get_configuration(jsonsensor);
+    sensor_temp[i]->to_json(jsonsensor);
 
     if (jsonsensor["found"] == true)
       switch (i) {
         case DS18B20_BABORD_0 : {
+          ConfigItem(sensor_temp[i])
+            ->set_title("Echappt Babord")
+            ->set_description("T° Echappement Moteur Babord")
+            ->set_sort_order(UI_ORDER_TEMP);
+
           sensor_temp[DS18B20_BABORD_0]
             ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_BABORD_0], conf_path_temp[DS18B20_BABORD_0],
                         new SKMetadata("K", "Echappt Babord", sk_path_temp[DS18B20_BABORD_0], "T° Echappement Moteur Babord")));
           break;
         }
         case DS18B20_TRIBORD_1 : {
+          ConfigItem(sensor_temp[i])
+            ->set_title("Echappt Tribord")
+            ->set_description("T° Echappement Moteur Tribord")
+            ->set_sort_order(UI_ORDER_TEMP+1);
+
           sensor_temp[DS18B20_TRIBORD_1]
             ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_TRIBORD_1], conf_path_temp[DS18B20_TRIBORD_1],
                         new SKMetadata("K", "Echappt Tribord", sk_path_temp[DS18B20_TRIBORD_1], "T° Echappement Moteur Tribord")));
           break;
         }
         case DS18B20_COMMON_2 : {
+          ConfigItem(sensor_temp[i])
+            ->set_title("Compartiment Moteur")
+            ->set_description("T° Compartiment Moteur")
+            ->set_sort_order(UI_ORDER_TEMP+2);
+
           sensor_temp[DS18B20_COMMON_2]
             ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_COMMON_2], conf_path_temp[DS18B20_COMMON_2],
                         new SKMetadata("K", "Compartiment Moteur", sk_path_temp[DS18B20_COMMON_2], "T° Compartiment Moteur")));
@@ -365,9 +383,12 @@ void setupTemperatureSensors() {
 // @param Vin Volt input (3.5V)
 // @param R1 Known resistance in ohm (0.1 ohm for INA3221)
 void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine, float Vin, float R1) {
+  VoltageDividerR2 *sensor_volt_divider_CH1 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_Id][INA3221_CH1] + "/VOLTAGE_DIVIDER");
+  VoltageDividerR2 *sensor_volt_divider_CH2 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_Id][INA3221_CH2] + "/VOLTAGE_DIVIDER");
+
     // Voltage for Coolant Temperature gauge
   sensor_volt[INA3221_Id][INA3221_CH1]
-    ->connect_to(new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_Id][INA3221_CH1] + "/VOLTAGE_DIVIDER"))
+    ->connect_to(sensor_volt_divider_CH1)
     ->connect_to(new CoolantTemperature(conf_path_volt[INA3221_Id][INA3221_CH1] + "/COOLANT_TEMPERATURE"))
     ->connect_to(new LambdaTransform<float, float, float, float>(filterKelvinValues, 273.15, 413.1, filterKelvinValues_ParamInfo, 
                                                                 conf_path_volt[INA3221_Id][INA3221_CH1] + "/TRANSFORM"))
@@ -375,7 +396,10 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine, float Vin, fl
     //->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_Id][INA3221_CH1] + "/MOVING_AVERAGE"))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1],
                     new SKMetadata("K", "T° Eau " + engine, "Coolant temperature", "Temp " + engine)));
-
+  ConfigItem(sensor_volt_divider_CH1)
+    ->set_title("Température Eau")
+    ->set_description("T° Eau - INA3221_CH1 - VoltageDividerR2")
+    ->set_sort_order(UI_ORDER_ENGINE);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_Id][INA3221_CH1]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1] + ".raw"));
@@ -383,13 +407,16 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine, float Vin, fl
 
   // Voltage for Oil Pressure gauge
   sensor_volt[INA3221_Id][INA3221_CH2]
-    ->connect_to(new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_Id][INA3221_CH2] + "/VOLTAGE_DIVIDER"))
+    ->connect_to(sensor_volt_divider_CH2)
     ->connect_to(new OilPressure(conf_path_volt[INA3221_Id][INA3221_CH2] + "/OIL_PRESSURE"))
     ->connect_to(new LinearPositive(pow(10, 5), 0.0, conf_path_volt[INA3221_Id][INA3221_CH2] + "/LINEAR_BAR_TO_PA"))
     //->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_Id][INA3221_CH2]))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2],
                     new SKMetadata("Pa", "Pression Huile " + engine, "Oil pressure", "Huile " + engine)));
-
+  ConfigItem(sensor_volt_divider_CH2)
+    ->set_title("Pression Huile")
+    ->set_description("Pression Huile - INA3221_CH2 - VoltageDividerR2")
+    ->set_sort_order(UI_ORDER_ENGINE+1);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_Id][INA3221_CH2]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2] + ".raw"));
@@ -408,15 +435,21 @@ void setupVoltageTankSensors(float Vin, float R1) {
   // 1. Take the maximum analog input value (i.e. value when sensor is at the high end)
   // 2. Divide 1 by max value. In my case: 1 / 870 = 0.001149425
   // Assuming the resistance is 3-180 ohms for VDO / Veritron gauge
+  VoltageDividerR2 *sensor_volt_divider_CH1 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/VOLTAGE_DIVIDER");
+  VoltageDividerR2 *sensor_volt_divider_CH2 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/VOLTAGE_DIVIDER");
+  VoltageDividerR2 *sensor_volt_divider_CH3 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/VOLTAGE_DIVIDER");
 
   // Fuel tank volume on portside
   sensor_volt[INA3221_CUVES_1][INA3221_CH1]
-    ->connect_to(new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/VOLTAGE_DIVIDER"))
+    ->connect_to(sensor_volt_divider_CH1)
     ->connect_to(new LinearPositive(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/LINEAR_POSITIVE"))
     ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/MOVING_AVERAGE"))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH1],
                   new SKMetadata("m3", "Cuve Babord", "Niveau carburant Babord", "Cuve Babord")));
-
+  ConfigItem(sensor_volt_divider_CH1)
+    ->set_title("Cuve Babord")
+    ->set_description("Cuve Babord - INA3221_CH1 - VoltageDividerR2")
+    ->set_sort_order(UI_ORDER_TANK);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_CUVES_1][INA3221_CH1]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH1] + ".raw"));
@@ -424,12 +457,15 @@ void setupVoltageTankSensors(float Vin, float R1) {
 
   // Fuel tank volume on starboard
   sensor_volt[INA3221_CUVES_1][INA3221_CH2]
-    ->connect_to(new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/VOLTAGE_DIVIDER"))
+    ->connect_to(sensor_volt_divider_CH2)
     ->connect_to(new LinearPositive(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/LINEAR_POSITIVE"))
     ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/MOVING_AVERAGE"))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH2],
                   new SKMetadata("m3", "Cuve Tribord", "Niveau carburant Tribord", "Cuve Tribord")));
-
+  ConfigItem(sensor_volt_divider_CH2)
+    ->set_title("Cuve Tribord")
+    ->set_description("Cuve Tribord - INA3221_CH2 - VoltageDividerR2")
+    ->set_sort_order(UI_ORDER_TANK+1);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_CUVES_1][INA3221_CH2]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH2] + ".raw"));
@@ -437,12 +473,15 @@ void setupVoltageTankSensors(float Vin, float R1) {
 
   // Water tank volume
   sensor_volt[INA3221_CUVES_1][INA3221_CH3]
-    ->connect_to(new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/VOLTAGE_DIVIDER"))
+    ->connect_to(sensor_volt_divider_CH3)
     ->connect_to(new LinearPositive(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/LINEAR_POSITIVE"))
     ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/MOVING_AVERAGE"))
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH3],
                   new SKMetadata("m3", "Cuve Eau douce", "Niveau eau douce", "Cuve Eau")));
-
+  ConfigItem(sensor_volt_divider_CH3)
+    ->set_title("Cuve Eau douce")
+    ->set_description("Cuve Eau douce - INA3221_CH3 - VoltageDividerR2")
+    ->set_sort_order(UI_ORDER_TANK+2);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_CUVES_1][INA3221_CH3]
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH3] + ".raw"));
@@ -454,17 +493,34 @@ void setupVoltageChainSensors() {
   conf_windlass = jdoc_conf_windlass.to<JsonObject>();                                               // Store Windlass configuration
   conf_windlass["k"] = gipsy_circum;                                                                 // Default direction = UP
   chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, conf_path_chain[CHAIN_COUNTER_PATH]);  // Chain counter in meter
-  sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, RISING, read_delay);    // Count pulses per revolution
 
-  chain_counter->get_configuration(conf_windlass);                                                   // Retrieve last saved value if exists
-  sensor_windlass_debounce = sensor_windlass
-    ->connect_to(new DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY])); // Avoid multiples counts
-  auto *sensor_windlass_counter = sensor_windlass_debounce
-    ->connect_to(chain_counter);
+  // I'm not using DigitalInputDebounceCounter as it is unfinished in SensESP 3.0.0
+  DigitalInputCounter *sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, 
+                                                                RISING, read_delay);                 // Count pulses per revolution
+  DebounceInt *chain_debounce = new DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY]);
+
+  chain_counter->to_json(conf_windlass);                                                             // Retrieve last saved value if exists
+  sensor_windlass_debounce = sensor_windlass->connect_to(chain_debounce);                            // Avoid multiples counts
+  auto *sensor_windlass_counter = sensor_windlass_debounce->connect_to(chain_counter);
   sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
     ->connect_to(new SKOutputFloat(sk_path_windlass, 
                 new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the value to SignalK
+
+  /* Set SensUP Configuration UI for chain_counter and sensor_windlass_debounce
+  
+  If you want something to appear in the web UI, you first define overloaded ConfigSchema and ConfigRequiresRestart functions for that class.
+  Then, you call ConfigItem to actually instantiate the ConfigItemT object
+  */
+  ConfigItem(chain_counter)
+    ->set_title("Compteur Chaine")
+    ->set_description("Compteur Chaine - PersistentIntegrator")
+    ->set_sort_order(UI_ORDER_CHAIN);
+
+  ConfigItem(chain_debounce)
+    ->set_title("Compteur Chaine Debounce")
+    ->set_description("Compteur Chaine - DebounceInt")
+    ->set_sort_order(UI_ORDER_CHAIN+1);
 
   #ifdef DEBUG_MODE
   sensor_windlass_debounce->connect_to(new SKOutputInt(sk_path_windlass + ".debounce.raw"));
@@ -725,9 +781,9 @@ void setup() {
   SensESPAppBuilder builder;
   sensesp_app = builder.set_hostname("birchwood-ESP32")->get_app();
 
-  //setupTemperatureSensors();
+  setupTemperatureSensors();
   setupVoltageSensors();
-  //setupRPMSensors();
+  setupRPMSensors();
   //delay(2000);
   //setupMotionSensor();
 }
