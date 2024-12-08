@@ -3,10 +3,11 @@
   - CurveInterpolator for Fuel Consumption, Coolant Temperature, Oil Pressure
   - Transform for Positive Linear transform and Engine Data
   - Integrator for Persistent Integrator
+  - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.4
-  @date 06/12/2024
+  @version 1.0.5
+  @date 08/12/2024
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -17,15 +18,6 @@
 #include <sensesp/transforms/integrator.h>
 
 using namespace sensesp;
-
-// Custom schema of Persistent Integrator for SensESP UI (last value is now saved)
-static const char PINTEGRATOR_SCHEMA[] PROGMEM = R"({
-    "type": "object",
-    "properties": {
-        "k": { "title": "Multiplier", "type": "number" },
-        "value": { "title": "Value", "type": "number" }
-    }
-  })";
 
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
 class FuelConsumption : public CurveInterpolator {
@@ -112,7 +104,7 @@ class EngineDataTransform {
     MovingAverage *moving_avg;
 
     EngineDataTransform(float multiplier, String conf_path_engine) { 
-        freq = new Frequency(multiplier, conf_path_engine);
+        freq = new Frequency(multiplier, conf_path_engine);             // Pulses to Hertz (Hz)
         hz_to_rpm = new Linear(60, 0.0);                                // Hertz (Hz) to Revolutions Per Minute (RPM)
         rpm_to_lhr = new FuelConsumption();                             // RPM to Liter per Hour (l/hr)
         lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
@@ -125,7 +117,7 @@ class PersistentIntegrator : public Transform<int, float> {
   public:
   PersistentIntegrator(float gipsy_circum = 1.0, float value = 0.0, const String& config_path = "")
      : Transform<int, float>(config_path), k{k}, value{value} {
-      this->load_configuration();
+      this->load();
       this->emit(value);
   }
 
@@ -136,12 +128,13 @@ class PersistentIntegrator : public Transform<int, float> {
 
   void reset() { value = 0.0; k = 1.0; }
 
-  virtual void get_configuration(JsonObject& doc) override final {
+  bool to_json(JsonObject& doc) {
     doc["k"] = k;
     doc["value"] = value;
+    return true;
   }
 
-  virtual bool set_configuration(const JsonObject& config) override final {
+  bool from_json(const JsonObject& config) {
     if (!config["k"].is<float>()) {
         return false;
       }
@@ -150,11 +143,39 @@ class PersistentIntegrator : public Transform<int, float> {
 
     return true;
   }
-  virtual String get_config_schema() override {
-    return FPSTR(PINTEGRATOR_SCHEMA);
-  }
 
  private:
   float k;
   float value = 0.0;
 };
+
+const String ConfigSchema(const PersistentIntegrator& obj) {
+return R"({
+  "type": "object",
+  "properties": {
+      "k": { "title": "Multiplier", "type": "number" },
+      "value": { "title": "Value", "type": "number" }
+  }
+})";
+}
+
+inline bool ConfigRequiresRestart(const PersistentIntegrator& obj) {
+  return true;
+}
+
+// Patched in custom debounce.h with appropriate template and removed from debounce.cpp.
+// from_json() and to_json moved into public section as well
+/*
+const String ConfigSchema(const Debounce<int>& obj) {
+  return R"###({
+    "type": "object",
+    "properties": {
+      "min_delay": {
+        "title": "Minimum delay",
+        "type": "number",
+        "description": "The minimum time in ms between inputs for output to happen"
+      }
+    }
+  })###";
+}
+*/
