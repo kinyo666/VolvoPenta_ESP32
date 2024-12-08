@@ -5,24 +5,20 @@
   - Integrator for Persistent Integrator
 
   @author kinyo666
-  @version 1.0.3
+  @version 1.0.4
   @date 06/12/2024
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
-#include <sensesp/sensors/constant_sensor.h>
-#include <sensesp/sensors/digital_input.h>
-#include <sensesp/signalk/signalk_output.h>
 #include <sensesp/transforms/linear.h>
 #include <sensesp/transforms/curveinterpolator.h>
 #include <sensesp/transforms/frequency.h>
 #include <sensesp/transforms/voltagedivider.h>
 #include <sensesp/transforms/moving_average.h>
 #include <sensesp/transforms/integrator.h>
-#include <sensesp_onewire/onewire_temperature.h>
 
 using namespace sensesp;
 
-// Custom schema of Persistent Integrator for SensESP UI
+// Custom schema of Persistent Integrator for SensESP UI (last value is now saved)
 static const char PINTEGRATOR_SCHEMA[] PROGMEM = R"({
     "type": "object",
     "properties": {
