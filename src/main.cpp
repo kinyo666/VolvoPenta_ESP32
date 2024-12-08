@@ -47,6 +47,7 @@
 //#include <string>
 #include <ReefwingMPU6050.h>
 #include "customClasses.h"
+#include "debounce.h"
 
 // Temperature sensors DS18B20
 #define DS18B20_PIN 33            // Use ADC1 pin (GPIO32-35) rather than ADC2 pin to avoid Wifi interference
