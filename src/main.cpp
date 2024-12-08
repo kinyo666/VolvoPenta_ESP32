@@ -3,7 +3,7 @@
   P0
   - Utiliser un MovingAverage sur la valeur RPM
   - Debugger l'instanciation du ReefwingMPU
-  
+    
   P1
   - Ajouter une moyenne de consommation de carburant réelle
   - Ajouter un capteur d'assiette MPU 9250 / 6500
@@ -30,7 +30,7 @@
 
   @author kinyo666
   @version 1.0.4
-  @date 06/12/2024
+  @date 08/12/2024
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
   @link Based on https://github.com/Boatingwiththebaileys/ESP32-code
@@ -48,13 +48,6 @@
 #include <sensesp/sensors/constant_sensor.h>
 #include <sensesp/sensors/digital_input.h>
 #include <sensesp/signalk/signalk_output.h>
-//#include "sensesp/signalk/signalk_put_request.h"
-#include <sensesp/transforms/linear.h>
-#include <sensesp/transforms/curveinterpolator.h>
-#include <sensesp/transforms/frequency.h>
-#include <sensesp/transforms/voltagedivider.h>
-#include <sensesp/transforms/moving_average.h>
-#include <sensesp/transforms/integrator.h>
 #include <sensesp_onewire/onewire_temperature.h>
 #include <string>
 #include <ReefwingMPU6050.h>
@@ -87,6 +80,10 @@
 // Windlass Chain counter
 #define CHAIN_COUNTER_PIN 32
 #define CHAIN_COUNTER_SAVE_TIMER 10
+#define CHAIN_COUNTER_IGNORE_DELAY 20
+#define CHAIN_COUNTER_PATH 0
+#define CHAIN_COUNTER_DELAY 1
+#define CHAIN_COUNTER_NB 2
 
 // Use Debug Mode for verbose logs and Fake Mode to simulate RPM data
 #define DEBUG_MODE 1
@@ -96,7 +93,7 @@ using namespace sensesp;
 using namespace sensesp::onewire;
 
 enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE, STATE };
-struct SKAttitudeVector {                           // Defined in SensESP v3.0.1
+struct SKAttitudeVector {                           // Backwards compatibility for SensESP < v3.0.1
   float roll;
   float pitch;
   float yaw;  // heading
@@ -129,7 +126,7 @@ const String conf_path_volt[INA3221_NB][INA3221_CH_NUM] = {
         {"/CONFIG/TRIBORD/INA3221/2/LINEAR_CH1",  "/CONFIG/TRIBORD/INA3221/2/LINEAR_CH2", "/CONFIG/TRIBORD/INA3221/2/LINEAR_CH3"}};
 const String conf_path_engines[ENGINE_NB] = {"/CONFIG/BABORD/PC817/FREQUENCY_RPM", 
                                             "/CONFIG/TRIBORD/PC817/FREQUENCY_RPM"};
-const String conf_path_chain = "/CONFIG/CHAINE/COUNTER";
+const String conf_path_chain[CHAIN_COUNTER_NB] = { "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
 const String conf_path_motion = "/CONFIG/MOTION";
 const float gipsy_circum = 0.43982;                           // Windlass gipsy circumference
 const unsigned int read_delay = 1000;                         // Sensors read delay = 1s
@@ -145,6 +142,7 @@ FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake values
 #endif
 DigitalInputCounter *sensor_windlass;                         // Windlass sensor
 PersistentIntegrator *chain_counter;                          // Windlass chain counter
+Transform<int, int> *sensor_windlass_debounce;                               // 
 JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
@@ -156,141 +154,7 @@ SKAttitudeVector attitude_vector;                             // Vector for roll
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
 
-/*
-// Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
-class FuelConsumption : public CurveInterpolator {
- public:
-  FuelConsumption(String config_path = "")
-      : CurveInterpolator(NULL, config_path) {
-    // Populate a lookup table to translate the RPM values to L/h (1 L/h = 0,001 m3/h)
-    clear_samples();
-    // addSample(CurveInterpolator::Sample(rpmValue, litersPerHour));
-    add_sample(CurveInterpolator::Sample(2000, 23.80));
-    add_sample(CurveInterpolator::Sample(2100, 25.37));
-    add_sample(CurveInterpolator::Sample(2200, 26.19));
-    add_sample(CurveInterpolator::Sample(2300, 27.80));
-    add_sample(CurveInterpolator::Sample(2400, 28.91));
-    add_sample(CurveInterpolator::Sample(2500, 30.01));
-    add_sample(CurveInterpolator::Sample(2600, 31.09));
-    add_sample(CurveInterpolator::Sample(2700, 32.38));
-    add_sample(CurveInterpolator::Sample(2800, 33.60));
-    add_sample(CurveInterpolator::Sample(2900, 34.38)); 
-    add_sample(CurveInterpolator::Sample(3000, 35.16));
-    add_sample(CurveInterpolator::Sample(3100, 36.07)); 
-    add_sample(CurveInterpolator::Sample(3200, 37.00));
-    add_sample(CurveInterpolator::Sample(3300, 37.60));
-    add_sample(CurveInterpolator::Sample(3400, 39.09));
-    add_sample(CurveInterpolator::Sample(3500, 39.70));
-    add_sample(CurveInterpolator::Sample(3600, 40.74));
-  }
-};
-
-// Temperature Interpreter (MD2030 based)
-class CoolantTemperature : public CurveInterpolator {
- public:
-  CoolantTemperature(String config_path = "")
-      : CurveInterpolator(NULL, config_path) {
-    // Populate a lookup table to translate the ohm values returned by the temperature sender to degrees Kelvin
-    clear_samples();
-    // addSample(CurveInterpolator::Sample(knownOhmValue, knownKelvin));
-    add_sample(CurveInterpolator::Sample(20, 393.15));
-    add_sample(CurveInterpolator::Sample(30, 383.15));
-    add_sample(CurveInterpolator::Sample(40, 373.15));
-    add_sample(CurveInterpolator::Sample(55, 363.15));
-    add_sample(CurveInterpolator::Sample(70, 353.15));
-    add_sample(CurveInterpolator::Sample(100, 343.15));
-    add_sample(CurveInterpolator::Sample(140, 333.15));
-    add_sample(CurveInterpolator::Sample(200, 323.15));
-    add_sample(CurveInterpolator::Sample(300, 317.15));
-    add_sample(CurveInterpolator::Sample(400, 313.15)); 
-  }
-};
-
-// Oil Pressure Interpreter
-class OilPressure : public CurveInterpolator {
- public:
-  OilPressure(String config_path = "")
-      : CurveInterpolator(NULL, config_path) {
-    // Populate a lookup table to translate the ohm values returned by the oil pressure sender to bar
-    clear_samples();
-    // addSample(CurveInterpolator::Sample(knownOhmValue, knownBar));
-    add_sample(CurveInterpolator::Sample(10, 0.0));
-    add_sample(CurveInterpolator::Sample(52, 2.0));
-    add_sample(CurveInterpolator::Sample(88, 4.0));
-    add_sample(CurveInterpolator::Sample(124, 6.0));
-  }
-};
-
-// Override the Linear class to return values only when positive (e.g RPM = 0.0 => Fuel rate = 0.0)
-class LinearPositive : public LambdaTransform<float, float, float, float> {
- public:
-  LinearPositive(float multiplier, float offset, const String& config_path = "")
-    : LambdaTransform<float, float, float, float>(function_, multiplier, offset,
-                                                  param_info_, config_path) {}
- private:
-  static float (*function_)(float, float, float);
-  static const ParamInfo param_info_[];
-};
-
-
-// Define the engines transform to output data to Signal-K
-class EngineDataTransform {
-  public :
-    Frequency *freq;
-    Linear *hz_to_rpm;
-    FuelConsumption *rpm_to_lhr;
-    LinearPositive *lhr_to_m3s;
-    MovingAverage *moving_avg;
-
-    EngineDataTransform(float multiplier, String conf_path_engine) { 
-        freq = new Frequency(multiplier, conf_path_engine);
-        hz_to_rpm = new Linear(60, 0.0);                                // Hertz (Hz) to Revolutions Per Minute (RPM)
-        rpm_to_lhr = new FuelConsumption();                             // RPM to Liter per Hour (l/hr)
-        lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
-        moving_avg = new MovingAverage(2, 1.0);                         // Moving average with 2 samples
-      }
-};
-
-// Override Integrator class with persistent last value and k multiplier configuration
-class PersistentIntegrator : public Transform<int, float> {
-  public:
-  PersistentIntegrator(float gipsy_circum = 1.0, float value = 0.0, const String& config_path = "")
-     : Transform<int, float>(config_path), k{k}, value{value} {
-      this->load_configuration();
-      this->emit(value);
-  }
-
-  void set(const int& input) {
-    value += input * k;
-    this->emit(value);
-  }
-
-  void reset() { value = 0.0; k = 1.0; }
-
-  virtual void get_configuration(JsonObject& doc) override final {
-    doc["k"] = k;
-    doc["value"] = value;
-  }
-
-  virtual bool set_configuration(const JsonObject& config) override final {
-    if (!config["k"].is<float>()) {
-        return false;
-      }
-    k = config["k"];
-    value = (config["value"].is<float>() ? config["value"] : 0.0);    // May not have a value at the first load
-
-    return true;
-  }
-  virtual String get_config_schema() override {
-    return FPSTR(PINTEGRATOR_SCHEMA);
-  }
-
- private:
-  float k;
-  float value = 0.0;
-};
-*/
-
+// Callback for Linear Positive (Linera Transform which returns 0.0 if not positive)
 float (*LinearPositive::function_)(float, float, float) =
     [](float input, float multiplier, float offset) {
       if (input > 0)
@@ -307,7 +171,6 @@ auto filterKelvinValues = [](float input, float offset = 273.15, float max = 413
 };
 
 const ParamInfo* filterKelvinValues_ParamInfo = new ParamInfo[2]{{"offset", "Offset"}, {"max", "Max value"}};
-
 
 // Setup the INA3221 volt sensors
 // The INA3221 must have an I²C address on A0 pin, solder the right pin GND (0x40) / SDA (0x41) / SCL (0x42) / VS (0x43)
@@ -411,7 +274,7 @@ float getVoltageINA3221_OTHERS3_CH2() {
 // This function is called after each sensor_windlass value changes
 // TODO : Ajouter un contrôle de la valeur avec CHAIN_LIMIT_LOW et CHAIN_LIMIT HIGH ?
 void handleChainCounterChange() {
-  if (sensor_windlass->get() > 0) {
+  if (sensor_windlass_debounce->get() > 0) {
     chain_counter_saved = false;          // Set the last value status to 'not saved'
     chain_counter_timer = 0;              // Arm a timer to save chain counter last value after CHAIN_COUNTER_SAVE_TIMER cycles
 
@@ -588,20 +451,24 @@ void setupVoltageTankSensors(float Vin, float R1) {
 
 // Windlass chain counter
 void setupVoltageChainSensors() {
-  conf_windlass = jdoc_conf_windlass.to<JsonObject>();
-  conf_windlass["k"] = gipsy_circum;                                                              // Default direction = UP
-  chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, conf_path_chain);                   // Chain counter in meter
-  sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, RISING, read_delay); // ou INPUT_PULLDOWN si positif ?
-  chain_counter->get_configuration(conf_windlass);                                                // Retrieve last saved value if exists
-  
-  auto *sensor_windlass_counter = sensor_windlass->connect_to(chain_counter);
-  sensor_windlass_counter->attach(handleChainCounterChange);                                      // Set a callback for each value read
+  conf_windlass = jdoc_conf_windlass.to<JsonObject>();                                               // Store Windlass configuration
+  conf_windlass["k"] = gipsy_circum;                                                                 // Default direction = UP
+  chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, conf_path_chain[CHAIN_COUNTER_PATH]);  // Chain counter in meter
+  sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, RISING, read_delay);    // Count pulses per revolution
+
+  chain_counter->get_configuration(conf_windlass);                                                   // Retrieve last saved value if exists
+  sensor_windlass_debounce = sensor_windlass
+    ->connect_to(new DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY])); // Avoid multiples counts
+  auto *sensor_windlass_counter = sensor_windlass_debounce
+    ->connect_to(chain_counter);
+  sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
-  ->connect_to(new SKOutputFloat(sk_path_windlass, 
-                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));
+    ->connect_to(new SKOutputFloat(sk_path_windlass, 
+                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the value to SignalK
 
   #ifdef DEBUG_MODE
-  sensor_windlass->connect_to(new SKOutputFloat(sk_path_windlass + ".raw"));
+  sensor_windlass_debounce->connect_to(new SKOutputInt(sk_path_windlass + ".debounce.raw"));
+  sensor_windlass->connect_to(new SKOutputInt(sk_path_windlass + ".raw"));
   sensor_volt[INA3221_OTHERS_3][INA3221_CH1]
     ->connect_to(new SKOutputFloat(sk_path_windlass + ".CH1.raw"));
   sensor_volt[INA3221_OTHERS_3][INA3221_CH2]
