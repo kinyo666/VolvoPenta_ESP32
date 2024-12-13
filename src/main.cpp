@@ -2,7 +2,6 @@
   TODO :
   P0
   - Utiliser un MovingAverage sur la valeur RPM
-  - Debugger l'instanciation du ReefwingMPU
     
   P1
   - Ajouter une moyenne de consommation de carburant réelle
@@ -10,6 +9,7 @@
 
   P2
   - Surcharger la classe SKMetaData pour envoyer les données de zones
+  - Réécrire LinearPositive avec une LambdaTransform
 
   Volvo Penta digital dashboard :
   - Coolant temperature
@@ -24,8 +24,8 @@
   - Bilge temperature
 
   @author kinyo666
-  @version 1.0.5
-  @date 08/12/2024
+  @version 1.0.6
+  @date 14/12/2024
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
   @link Based on https://github.com/Boatingwiththebaileys/ESP32-code
@@ -44,8 +44,8 @@
 #include <sensesp/sensors/digital_input.h>
 #include <sensesp/signalk/signalk_output.h>
 #include <sensesp_onewire/onewire_temperature.h>
-//#include <string>
-#include <ReefwingMPU6050.h>
+#include <string>
+#include "MPU6050_6Axis_MotionApps20.h"
 #include "customClasses.h"
 #include "debounce.h"
 
@@ -76,7 +76,7 @@
 // Windlass Chain counter
 #define CHAIN_COUNTER_PIN 32
 #define CHAIN_COUNTER_SAVE_TIMER 10
-#define CHAIN_COUNTER_IGNORE_DELAY 50
+#define CHAIN_COUNTER_IGNORE_DELAY 900
 #define CHAIN_COUNTER_PATH 0
 #define CHAIN_COUNTER_DELAY 1
 #define CHAIN_COUNTER_NB 2
@@ -92,18 +92,14 @@
 #define UI_ORDER_CHAIN 40
 #define UI_ORDER_MOTION 50
 
+// Motion sensor MPU9250
+#define MPU9250_ATTITUDE 0
+#define MPU9250_HEADING 1
+
 using namespace sensesp;
 using namespace sensesp::onewire;
 
 enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE, STATE };
-struct SKAttitudeVector {                           // Backwards compatibility for SensESP < v3.0.1
-  float roll;
-  float pitch;
-  float yaw;  // heading
- 
-  SKAttitudeVector(float roll = 0.0, float pitch = 0.0, float yaw = 0.0)
-      : roll(roll), pitch(pitch), yaw(yaw) {}
-};
 
 // Constants for Signal-K path
 const String sk_path_temp[DS18B20_NB] = {
@@ -118,7 +114,7 @@ const String sk_path_engines[ENGINE_NB][ENGINE_SK_PATH_NB] = {
         {"propulsion.babord.revolutions",   "propulsion.babord.fuel.rate",  "propulsion.babord.state"},
         {"propulsion.tribord.revolutions",  "propulsion.tribord.fuel.rate", "propulsion.tribord.state"}};
 const String sk_path_windlass = "navigation.anchor.rodeDeployed";
-const String sk_path_motion = "navigation.attitude";
+const String sk_path_motion[2] = { "navigation.attitude", "navigation.headingMagnetic" };
 
 // Constants for SensESP Configuration
 const String conf_path_temp[DS18B20_NB] = {
@@ -145,15 +141,20 @@ DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 PC817 RPM Sen
 #else
 FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake values
 #endif
+
+// Windlass sensor
 Transform<int, int> *sensor_windlass_debounce;                // Windlass sensor (DigitalInputCounter + Debounce)
 PersistentIntegrator *chain_counter;                          // Windlass chain counter
 JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
 boolean chain_counter_saved = true;                           // Trigger to save chain counter new value
-ReefwingMPU6050 *sensor_mpu;                                  // 1 MPU-6050 Motion sensor
+
+// Motion sensor          
+MPU6050 sensor_mpu;                                           // 1 MPU-6050 Motion sensor
 RepeatSensor<String> *sensor_motion;                          // MPU Motion values
-SKAttitudeVector attitude_vector;                             // Vector for roll, pitch and yaw values (SensESP < 3.0.0)
+//RepeatSensor<float> *sensor_compass;                          // MPU Compass values
+//SKAttitudeVector attitude_vector;                             // Vector for roll, pitch and yaw values (SensESP < 3.0.0)
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
@@ -166,15 +167,25 @@ float (*LinearPositive::function_)(float, float, float) =
       else
         return (0.0f);
     };
-
 const ParamInfo LinearPositive::param_info_[] = {{"multiplier", "Multiplier"}, {"offset", "Offset"}};
 
 // Filter Kelvin values out of range
 auto filterKelvinValues = [](float input, float offset = 273.15, float max = 413.1) -> float {
     return ((((input - offset) > 0) && (input < max)) ? input : offset);
 };
-
 const ParamInfo* filterKelvinValues_ParamInfo = new ParamInfo[2]{{"offset", "Offset"}, {"max", "Max value"}};
+
+// Callback for LambdaTransform to add a UP/DOWN/IDLE symbol to the chain counter
+auto chainCounterToString = [](float input) -> String {
+  String chainCounterString = String(input) + "m ";
+  if (conf_windlass["k"].as<float>() > 0)
+    chainCounterString += "▲";
+  else if (conf_windlass["k"].as<float>() < 0)
+    chainCounterString += "▼";
+  else
+    chainCounterString += "▬";
+  return chainCounterString;
+};
 
 // Setup the INA3221 volt sensors
 // The INA3221 must have an I²C address on A0 pin, solder the right pin GND (0x40) / SDA (0x41) / SCL (0x42) / VS (0x43)
@@ -244,7 +255,7 @@ float getVoltageINA3221_OTHERS3_CH1() {
       #endif
     }
   else {
-    chain_counter_timer = ((chain_counter_saved == true) ? 0 : (chain_counter_timer + 1));  // Avoid infinite increment without changes
+    chain_counter_timer = ((chain_counter_saved == true) ? 0 : (chain_counter_timer + 1));  // Avoid infinite increment when no changes
 
     #ifdef DEBUG_MODE
     Serial.printf("WINDLASS : UP NOK -> up = %f direction = %f timer = %i saved = %s\n", up, 
@@ -288,34 +299,38 @@ void handleChainCounterChange() {
   }
 }
 
+// Callback for motion sensor
+// @return Attitude JSON Vector with Yaw, Pitch, Roll
+// @see https://youtu.be/kCS-wmnhlvQ
 String getMotionSensorValues() {
- //unsigned long timer = millis();
-
-  //    Read normalized values
-  ScaledData norm = sensor_mpu->readNormalizeGyro();
-
-  //    Calculate Pitch, Roll and Yaw
-  //    Need to integrate gyro rates (DPS) to get Degrees
-  attitude_vector.pitch += norm.sy * 0.01;
-  attitude_vector.roll += norm.sx * 0.01;
-  attitude_vector.yaw += norm.sz * 0.01;
-
-  #ifdef DEBUG_MODE
-  Serial.printf("Roll: %f", attitude_vector.roll);
-  Serial.printf("\tPitch: %f", attitude_vector.pitch);
-  Serial.printf("\tYaw: %f\n", attitude_vector.yaw);
-  #endif
-
-  //    Wait for full timeStep period, blocking
-  //delay((0.01 * 1000) - (millis() - timer));
-
+  Quaternion q;           // [w, x, y, z]         Quaternion container
+  VectorFloat gravity;    // [x, y, z]            Gravity vector
+  float ypr[3];           // [yaw, pitch, roll]   Yaw/Pitch/Roll container and gravity vector
+  uint8_t FIFOBuffer[64]; // FIFO storage buffer
   JsonDocument json_doc;
   String json;
-  //json_doc["path"] = sk_path_motion;
   JsonObject value = json_doc.to<JsonObject>();
-  value["roll"] = attitude_vector.roll;
-  value["pitch"] = attitude_vector.pitch;
-  value["yaw"] = attitude_vector.yaw;
+  
+  //if (!DMPReady) return; // Stop the program if DMP programming fails.
+    
+  /* Read a packet from FIFO */
+  if (sensor_mpu.dmpGetCurrentFIFOPacket(FIFOBuffer)) { // Get the Latest packet 
+    sensor_mpu.dmpGetQuaternion(&q, FIFOBuffer);
+    sensor_mpu.dmpGetGravity(&gravity, &q);
+    sensor_mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+
+    value["roll"] = ypr[2];       // Roll / Roulis
+    value["pitch"] = ypr[1];      // Pitch / Tangage
+    value["yaw"] = ypr[0];        // Yaw / 
+    #ifdef DEBUG_MODE
+      Serial.printf("MOTION SENSOR : Yaw = %f°\t| Pitch = %f°\t| Roll = %f°\n", ypr[0] * 180/M_PI, ypr[1] * 180/M_PI, ypr[2] * 180/M_PI);
+    #endif
+  }
+  else {
+    value["roll"] = NULL;
+    value["pitch"] = NULL;
+    value["yaw"] = NULL;
+  }
 
   serializeJson(json_doc, json);
   return json;
@@ -495,7 +510,7 @@ void setupVoltageChainSensors() {
   conf_windlass["k"] = gipsy_circum;                                                                 // Default direction = UP
   chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, conf_path_chain[CHAIN_COUNTER_PATH]);  // Chain counter in meter
 
-  // I'm not using DigitalInputDebounceCounter as it is unfinished in SensESP 3.0.0
+  // Do not use DigitalInputDebounceCounter as it is unfinished in SensESP 3.0.0
   DigitalInputCounter *sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, 
                                                                 RISING, read_delay);                 // Count pulses per revolution
   DebounceInt *chain_debounce = new DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY]);
@@ -506,12 +521,15 @@ void setupVoltageChainSensors() {
   sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
     ->connect_to(new SKOutputFloat(sk_path_windlass, 
-                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the value to SignalK
+                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the float value to SignalK
+
+  sensor_windlass_counter
+    ->connect_to(new LambdaTransform<float, String>(chainCounterToString))
+    ->connect_to(new SKOutputString(sk_path_windlass + ".direction"));                               // Output the value + direction to SignalK
 
   /* Set SensUP Configuration UI for chain_counter and sensor_windlass_debounce
-  
-  If you want something to appear in the web UI, you first define overloaded ConfigSchema and ConfigRequiresRestart functions for that class.
-  Then, you call ConfigItem to actually instantiate the ConfigItemT object
+     If you want something to appear in the web UI, you first define overloaded ConfigSchema and ConfigRequiresRestart functions for that class.
+     Then, you call ConfigItem to actually instantiate the ConfigItemT object
   */
   ConfigItem(chain_counter)
     ->set_title("Compteur Chaine")
@@ -739,40 +757,73 @@ void setupRPMSensors() {
 }
 
 // Motion Sensor
-// @link https://github.com/Reefwing-Software/Reefwing-MPU6050
+// @link https://registry.platformio.org/libraries/electroniccats/MPU6050
 void setupMotionSensor() {
-  Serial.print("Instanciate ReefwingMPU..");
-  sensor_mpu = new ReefwingMPU6050();
-  Serial.println("DONE");
+  uint8_t devStatus;      // Return status after each device operation (0 = success, !0 = error)
 
-  if (!sensor_mpu->begin())
-    Serial.println("Failed to find MPU6050 chip");
+  #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    Wire.begin();
+    Wire.setClock(400000); // 400kHz I2C clock. Comment on this line if having compilation difficulties
+  #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+    Fastwire::setup(400, true);
+  #endif
+
+  /*Initialize device*/
+  Serial.println(F("Initializing I2C devices..."));
+  sensor_mpu.initialize();
+  //pinMode(INTERRUPT_PIN, INPUT);
+
+  /*Verify connection*/
+  Serial.println(F("Testing MPU6050 connection..."));
+  if(sensor_mpu.testConnection() == false){
+    Serial.println("MPU6050 connection failed");
+    while(true);
+  }
+  else
+    Serial.println("MPU6050 connection successful");
+
+  /* Initializate and configure the DMP */
+  Serial.println(F("Initializing DMP..."));
+  devStatus = sensor_mpu.dmpInitialize();
   
-  if (sensor_mpu->connected()) {
-    Serial.println("MPU6050 IMU Connected.");
+  /* Supply your gyro offsets here, scaled for min sensitivity */
+  sensor_mpu.setXGyroOffset(0);
+  sensor_mpu.setYGyroOffset(0);
+  sensor_mpu.setZGyroOffset(0);
+  sensor_mpu.setXAccelOffset(0);
+  sensor_mpu.setYAccelOffset(0);
+  sensor_mpu.setZAccelOffset(0);
 
-    //  Set sensitivity threshold (default) and calibrate
-    sensor_mpu->setThreshold(3);
-    sensor_mpu->calibrateGyro();
-    delay(20);
-
-    //  Flush the first reading - this is important!
-    //  Particularly after changing the configuration.
-    sensor_mpu->readRawGyro();
+  /* Making sure it worked (returns 0 if so) */ 
+  if (devStatus == 0) {
+    sensor_mpu.CalibrateAccel(6);  // Calibration Time: generate offsets and calibrate our MPU6050
+    sensor_mpu.CalibrateGyro(6);
+    Serial.println("Active offsets : ");
+    sensor_mpu.PrintActiveOffsets();
+    Serial.print(F("Enabling DMP..."));   //Turning ON DMP
+    sensor_mpu.setDMPEnabled(true);
+    Serial.println(F("DMP ready !"));
+    //DMPReady = true;
+    uint16_t packetSize = sensor_mpu.dmpGetFIFOPacketSize(); //Get expected DMP packet size for later comparison
 
     sensor_motion = new RepeatSensor<String>(read_delay, getMotionSensorValues);
-    sensor_motion->connect_to((new SKOutputString(sk_path_motion)));
-  } else {
-    Serial.println("MPU6050 IMU Not Detected.");
-    //while(1);
+    sensor_motion->connect_to((new SKOutputRawJson(sk_path_motion[MPU9250_ATTITUDE])));
+  } 
+  else {
+    #ifdef DEBUG_MODE
+    Serial.print(F("DMP Initialization failed (code ")); //Print the error code
+    Serial.print(devStatus);
+    Serial.println(F(")"));
+    // 1 = initial memory load failed
+    // 2 = DMP configuration updates failed
+    #endif
   }
-  Serial.println("END OF SETUP");
 }
 
 // The setup function performs one-time application initialization.
 void setup() {
   #ifdef DEBUG_MODE
-  SetupLogging(ESP_LOG_DEBUG);
+  SetupLogging(ESP_LOG_VERBOSE); //ESP_LOG_DEBUG);
   #else
   SetupLogging(ESP_LOG_INFO);
   #endif
@@ -782,11 +833,10 @@ void setup() {
   SensESPAppBuilder builder;
   sensesp_app = builder.set_hostname("birchwood-ESP32")->get_app();
 
-  setupTemperatureSensors();
-  setupVoltageSensors();
-  setupRPMSensors();
-  //delay(2000);
-  //setupMotionSensor();
+  //setupTemperatureSensors();
+  //setupVoltageSensors();
+  //setupRPMSensors();
+  setupMotionSensor();
 }
 
 // The loop function is called in an endless loop during program execution.
