@@ -48,7 +48,8 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
     -D LED_BUILTIN=2
     -D CORE_DEBUG_LEVEL=ARDUHAL_LOG_LEVEL_VERBOSE
     -D TAG='"Arduino"'
-    -D USE_ESP_IDF_LOG```
+    -D USE_ESP_IDF_LOG
+  ```
 
 3. Download this code or fetch the repository :
 
