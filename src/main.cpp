@@ -5,8 +5,7 @@
     
   P1
   - Ajouter une moyenne de consommation de carburant réelle
-  - Ajouter un capteur d'assiette MPU 9250 / 6500
-
+  
   P2
   - Surcharger la classe SKMetaData pour envoyer les données de zones
   - Réécrire LinearPositive avec une LambdaTransform
@@ -22,6 +21,7 @@
   - Fresh water tank level
   - Exhaust temperature
   - Bilge temperature
+  - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
   @version 1.0.6
@@ -128,7 +128,6 @@ const String conf_path_volt[INA3221_NB][INA3221_CH_NUM] = {
 const String conf_path_engines[ENGINE_NB] = {"/CONFIG/BABORD/PC817/FREQUENCY_RPM", 
                                             "/CONFIG/TRIBORD/PC817/FREQUENCY_RPM"};
 const String conf_path_chain[CHAIN_COUNTER_NB] = { "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
-const String conf_path_motion = "/CONFIG/MOTION";
 const float gipsy_circum = 0.43982;                           // Windlass gipsy circumference
 const unsigned int read_delay = 1000;                         // Sensors read delay = 1s
 
@@ -154,7 +153,6 @@ boolean chain_counter_saved = true;                           // Trigger to save
 MPU6050 sensor_mpu;                                           // 1 MPU-6050 Motion sensor
 RepeatSensor<String> *sensor_motion;                          // MPU Motion values
 //RepeatSensor<float> *sensor_compass;                          // MPU Compass values
-//SKAttitudeVector attitude_vector;                             // Vector for roll, pitch and yaw values (SensESP < 3.0.0)
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
@@ -305,15 +303,13 @@ void handleChainCounterChange() {
 String getMotionSensorValues() {
   Quaternion q;           // [w, x, y, z]         Quaternion container
   VectorFloat gravity;    // [x, y, z]            Gravity vector
-  float ypr[3];           // [yaw, pitch, roll]   Yaw/Pitch/Roll container and gravity vector
+  float ypr[3];           // [yaw, pitch, roll]   Yaw/Pitch/Roll container
   uint8_t FIFOBuffer[64]; // FIFO storage buffer
-  JsonDocument json_doc;
+  JsonDocument json_doc;  // JSON radian values
   String json;
   JsonObject value = json_doc.to<JsonObject>();
   
-  //if (!DMPReady) return; // Stop the program if DMP programming fails.
-    
-  /* Read a packet from FIFO */
+  // Read a packet from FIFO
   if (sensor_mpu.dmpGetCurrentFIFOPacket(FIFOBuffer)) { // Get the Latest packet 
     sensor_mpu.dmpGetQuaternion(&q, FIFOBuffer);
     sensor_mpu.dmpGetGravity(&gravity, &q);
@@ -321,7 +317,7 @@ String getMotionSensorValues() {
 
     value["roll"] = ypr[2];       // Roll / Roulis
     value["pitch"] = ypr[1];      // Pitch / Tangage
-    value["yaw"] = ypr[0];        // Yaw / 
+    value["yaw"] = ypr[0];        // Yaw / Lacet
     #ifdef DEBUG_MODE
       Serial.printf("MOTION SENSOR : Yaw = %f°\t| Pitch = %f°\t| Roll = %f°\n", ypr[0] * 180/M_PI, ypr[1] * 180/M_PI, ypr[2] * 180/M_PI);
     #endif
@@ -768,12 +764,12 @@ void setupMotionSensor() {
     Fastwire::setup(400, true);
   #endif
 
-  /*Initialize device*/
+  // Initialize device
   Serial.println(F("Initializing I2C devices..."));
   sensor_mpu.initialize();
   //pinMode(INTERRUPT_PIN, INPUT);
 
-  /*Verify connection*/
+  // Verify connection
   Serial.println(F("Testing MPU6050 connection..."));
   if(sensor_mpu.testConnection() == false){
     Serial.println("MPU6050 connection failed");
@@ -782,11 +778,11 @@ void setupMotionSensor() {
   else
     Serial.println("MPU6050 connection successful");
 
-  /* Initializate and configure the DMP */
+  // Initializate and configure the DMP
   Serial.println(F("Initializing DMP..."));
   devStatus = sensor_mpu.dmpInitialize();
   
-  /* Supply your gyro offsets here, scaled for min sensitivity */
+  // Supply your gyro offsets here, scaled for min sensitivity
   sensor_mpu.setXGyroOffset(0);
   sensor_mpu.setYGyroOffset(0);
   sensor_mpu.setZGyroOffset(0);
@@ -794,24 +790,23 @@ void setupMotionSensor() {
   sensor_mpu.setYAccelOffset(0);
   sensor_mpu.setZAccelOffset(0);
 
-  /* Making sure it worked (returns 0 if so) */ 
+  // Making sure it worked (returns 0 if so)
   if (devStatus == 0) {
-    sensor_mpu.CalibrateAccel(6);  // Calibration Time: generate offsets and calibrate our MPU6050
+    sensor_mpu.CalibrateAccel(6);         // Calibration Time: generate offsets and calibrate our MPU6050
     sensor_mpu.CalibrateGyro(6);
     Serial.println("Active offsets : ");
     sensor_mpu.PrintActiveOffsets();
-    Serial.print(F("Enabling DMP..."));   //Turning ON DMP
+    Serial.print(F("Enabling DMP..."));   // Turning ON DMP
     sensor_mpu.setDMPEnabled(true);
     Serial.println(F("DMP ready !"));
-    //DMPReady = true;
-    uint16_t packetSize = sensor_mpu.dmpGetFIFOPacketSize(); //Get expected DMP packet size for later comparison
+    uint16_t packetSize = sensor_mpu.dmpGetFIFOPacketSize(); // Get expected DMP packet size for later comparison
 
     sensor_motion = new RepeatSensor<String>(read_delay, getMotionSensorValues);
     sensor_motion->connect_to((new SKOutputRawJson(sk_path_motion[MPU9250_ATTITUDE])));
   } 
   else {
     #ifdef DEBUG_MODE
-    Serial.print(F("DMP Initialization failed (code ")); //Print the error code
+    Serial.print(F("DMP Initialization failed (code ")); // Print the error code
     Serial.print(devStatus);
     Serial.println(F(")"));
     // 1 = initial memory load failed
