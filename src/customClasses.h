@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.5
-  @date 08/12/2024
+  @version 1.0.7
+  @date 14/01/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -17,7 +17,38 @@
 #include <sensesp/transforms/moving_average.h>
 #include <sensesp/transforms/integrator.h>
 
+// Binary mask for engine state and sleep mode enable(1) / disable(0)
+#define ENGINE_STATE_OFF          0x000
+#define ENGINE_STATE_ON           0x001
+#define ENGINE_STATE_NOT_RUNNING  0x101
+#define ENGINE_STATE_RUNNING      0x011
+#define ENGINE_STATE_IS_RUNNING   0x010
+#define ENGINE_SLEEP_ENABLE 1
+
+extern void sleepModeINA3221(u_int8_t, u_int8_t);
+
 using namespace sensesp;
+
+typedef LambdaTransform<float, float, float, float> LinearPos;
+typedef LambdaTransform<float, boolean, u_int8_t> EngineState;
+
+// Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
+auto linearPositive = [](float input, float multiplier, float offset) -> float {
+  if (input > 0)
+    return multiplier * input + offset;
+  else
+    return (0.0f);
+};
+const ParamInfo* linerPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
+
+// Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
+auto runningState = [](float input, u_int8_t engine_id) -> boolean {
+  #if ENGINE_SLEEP_ENABLE == 1
+    sleepModeINA3221(engine_id, ((input > 1) ? ENGINE_STATE_RUNNING : ENGINE_STATE_NOT_RUNNING));
+  #endif
+    return (input > 0);
+};
+const ParamInfo* runningState_ParamInfo = new ParamInfo[1]{{"engine_state", "Engine State"}};
 
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
 class FuelConsumption : public CurveInterpolator {
@@ -83,6 +114,7 @@ class OilPressure : public CurveInterpolator {
   }
 };
 
+/*
 // Override the Linear class to return values only when positive (e.g RPM = 0.0 => Fuel rate = 0.0)
 class LinearPositive : public LambdaTransform<float, float, float, float> {
  public:
@@ -93,6 +125,7 @@ class LinearPositive : public LambdaTransform<float, float, float, float> {
   static float (*function_)(float, float, float);
   static const ParamInfo param_info_[];
 };
+*/
 
 // Define the engines transform to output data to Signal-K
 class EngineDataTransform {
@@ -100,15 +133,20 @@ class EngineDataTransform {
     Frequency *freq;
     Linear *hz_to_rpm;
     FuelConsumption *rpm_to_lhr;
-    LinearPositive *lhr_to_m3s;
+    LinearPos *lhr_to_m3s; //LinearPositive *lhr_to_m3s;
     MovingAverage *moving_avg;
+    EngineState *running_state;
 
-    EngineDataTransform(float multiplier, String conf_path_engine) { 
-        freq = new Frequency(multiplier, conf_path_engine);             // Pulses to Hertz (Hz)
-        hz_to_rpm = new Linear(60, 0.0);                                // Hertz (Hz) to Revolutions Per Minute (RPM)
-        rpm_to_lhr = new FuelConsumption();                             // RPM to Liter per Hour (l/hr)
-        lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
-        moving_avg = new MovingAverage(2, 1.0);                         // Moving average with 2 samples
+    EngineDataTransform(float multiplier, String conf_path_engine, u_int engine_id) { 
+        freq = new Frequency(multiplier, conf_path_engine);                 // Pulses to Hertz (Hz)
+        hz_to_rpm = new Linear(60, 0.0);                                    // Hertz (Hz) to Revolutions Per Minute (RPM)
+        rpm_to_lhr = new FuelConsumption();                                 // RPM to Liter per Hour (l/hr)
+        //lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
+        lhr_to_m3s = new LinearPos(linearPositive, 1 / (3.6 * pow(10, 6)), 
+                                  0.0, linerPositive_ParamInfo);            // Liter per Hour (l/hr) to Meter cube per second (m3/s)
+        moving_avg = new MovingAverage(2, 1.0);                             // Moving average with 2 samples
+        running_state = new EngineState(runningState, engine_id, 
+                                        runningState_ParamInfo);            // Hertz (Hz) to running state (true or false)
       }
 };
 
