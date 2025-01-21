@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.7
-  @date 14/01/2025
+  @version 1.0.8
+  @date 21/01/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -16,6 +16,7 @@
 #include <sensesp/transforms/voltagedivider.h>
 #include <sensesp/transforms/moving_average.h>
 #include <sensesp/transforms/integrator.h>
+#include <sensesp/ui/config_item.h>
 
 // Binary mask for engine state and sleep mode enable(1) / disable(0)
 #define ENGINE_STATE_OFF          0x000
@@ -25,7 +26,10 @@
 #define ENGINE_STATE_IS_RUNNING   0x010
 #define ENGINE_SLEEP_ENABLE 1
 
+#define DEBUG_MODE_CUSTOM_CLASSES_H 1
+
 extern void sleepModeINA3221(u_int8_t, u_int8_t);
+extern const String conf_path_global;
 
 using namespace sensesp;
 
@@ -147,6 +151,15 @@ class EngineDataTransform {
         moving_avg = new MovingAverage(2, 1.0);                             // Moving average with 2 samples
         running_state = new EngineState(runningState, engine_id, 
                                         runningState_ParamInfo);            // Hertz (Hz) to running state (true or false)
+
+        ConfigItem(freq)
+        ->set_title("Compte-tours - " + conf_path_engine)
+        ->set_description("Multiplier needs to be adjusted based on flywheel to Alternator W ratio."\
+                          "Example: 1 turn on an AQAD41 makes 2.45 turns on the Alternator, and the Alternator has 6 poles which makes a total of 2.45 x 6 = 14.7 Hz per turn. SignalK needs info in Hz so we need to divide the incoming value with 14.7, or as in our case multiply with (1/14.7) = 0,06803"\
+                          "If Ratio is unknown, the original Tachometer might have a max Impulses/min written on it, divide that with max rpm on the meter and you\'ll get the ratio. Tachometer 860420 is marked with 73500Imp/min and has a scale to 5000rpm. 73500 divided with 5000 equals 14,7, Tada!"\
+                          "If above multiplier needs to be recalculated, the FuelMultipliers needs to be recalculated as well, they're both based on AQAD41 values right now."\
+                          "AQAD41 example: 60 divided with FlyWheel To W Ratio (60 / 14,7 = 4,08)")
+        ->set_sort_order(25);
       }
 };
 
@@ -198,6 +211,146 @@ return R"({
 }
 
 inline bool ConfigRequiresRestart(const PersistentIntegrator& obj) {
+  return true;
+}
+
+// Load and save SensESP configuration to enable/disable sensors
+class ConfigSensESP : public SensorConfig {
+  public:
+  ConfigSensESP(const String& config_path) : SensorConfig(config_path) {
+    // Load current configuration otherwise set default values to true for all sensors
+    if (!load()) {
+      config_json["DS18B20_FEATURE"] = true;
+      config_json["DS18B20_BABORD_0"] = true;
+      config_json["DS18B20_TRIBORD_1"] = true;
+      config_json["DS18B20_COMMON_2"] = true;
+      config_json["INA3221_FEATURE"] = true;
+      config_json["INA3221_BABORD_0"] = true;
+      config_json["INA3221_CUVES_1"] = true;
+      config_json["INA3221_TRIBORD_2"] = true;
+      config_json["INA3221_OTHERS_3"] = true;
+      config_json["PC817_FEATURE"] = true;
+      config_json["PC817_BABORD"] = true;
+      config_json["PC817_TRIBORD"] = true;
+      config_json["CHAIN_COUNTER_FEATURE"] = true;
+      config_json["MOTION_SENSOR_FEATURE"] = true;
+      save();
+    }
+    // Initialize ConfigItem instance with custom ConfigSchema
+    ConfigItem(this)->set_title("Sensors Configuration")
+                    ->set_description("Enable or disable sensors by group or individually. Restart to apply any changes.")
+                    ->set_config_schema(get_config_schema())
+                    ->set_requires_restart(true)
+                    ->set_sort_order(0);
+
+    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+      Serial.println("SENSORS CONFIG :");
+      String jsonify;
+      serializeJsonPretty(config_json, jsonify);
+      Serial.println(jsonify);
+    #endif
+  }
+
+  // Set configuration to a JSON file
+  bool to_json(JsonObject& root) override { 
+    const char* keys[] = {
+      "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
+      "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
+      "INA3221_OTHERS_3", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
+      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE"
+    };
+
+    for (const char* key : keys)
+      if (config_json[key].is<bool>())
+        root[key] = config_json[key];
+      else
+        root[key] = false;
+
+    return true;
+  }
+
+  // Get configuration from the JSON file
+  bool from_json(const JsonObject& root) override {
+    const char* keys[] = {
+      "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
+      "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
+      "INA3221_OTHERS_3", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
+      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE"
+    };
+
+    for (const char* key : keys)
+      if (root[key].is<bool>())
+        config_json[key] = root[key];
+      else
+        config_json[key] = false;
+
+    return true;
+  }
+
+  // Return true if the sensor (key) is enabled
+  bool is_enabled(String key) {
+    if (config_json[key].is<bool>())
+      return config_json[key];
+    else
+      return false;
+  }
+
+  // Return the configuration path
+  const String& get_config_path() {
+    return conf_path_global;
+  }
+
+  const String get_config_schema() {
+    return R"({
+      "type": "object",
+      "properties": {
+        "DS18B20_FEATURE": { "type": "boolean", "title": "DS18B20 Feature" },
+        "DS18B20_BABORD_0": { "type": "boolean", "title": "- DS18B20 Babord" },
+        "DS18B20_TRIBORD_1": { "type": "boolean", "title": "- DS18B20 Tribord" },
+        "DS18B20_COMMON_2": { "type": "boolean", "title": "- DS18B20 Common" },
+        "INA3221_FEATURE": { "type": "boolean", "title": "INA3221 Feature" },
+        "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
+        "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
+        "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
+        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Others" },
+        "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
+        "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
+        "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
+        "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "Chain Counter Feature" },
+        "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" }
+      }
+    })";
+  }
+
+  private:
+  JsonDocument config_json;
+};
+
+// Set default config schema for ConfigSensESP
+const String ConfigSchema(const ConfigSensESP& obj) {
+  return R"({
+    "type": "object",
+    "properties": {
+      "DS18B20_FEATURE": { "type": "boolean", "title": "DS18B20 Feature" },
+      "DS18B20_BABORD_0": { "type": "boolean", "title": "- DS18B20 Babord" },
+      "DS18B20_TRIBORD_1": { "type": "boolean", "title": "- DS18B20 Tribord" },
+      "DS18B20_COMMON_2": { "type": "boolean", "title": "- DS18B20 Common" },
+      "INA3221_FEATURE": { "type": "boolean", "title": "INA3221 Feature" },
+      "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
+      "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
+      "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
+      "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Others" },
+      "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
+      "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
+      "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
+      "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "Chain Counter Feature" },
+      "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" }
+    }
+  })";
+}
+
+// Set requires restart to true for ConfigSensESP
+inline bool ConfigRequiresRestart(const ConfigSensESP& obj) {
   return true;
 }
 

@@ -3,10 +3,10 @@
   P0
   - Utiliser un MovingAverage sur la valeur RPM
   - Intégrer la lib MPU9250
-    
+
   P1
   - Ajouter une moyenne de consommation de carburant réelle
-  
+
   P2
   - Surcharger la classe SKMetaData pour envoyer les données de zones
 
@@ -24,8 +24,8 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.7
-  @date 14/01/2025
+  @version 1.0.8
+  @date 21/01/2025
   @ref SensESP v3.0.0
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -59,10 +59,10 @@
 #define DS18B20_COMMON_ADDR "28:ff:64:1f:75:83:99:c9"
 
 // Volt / Current sensors INA3221
-#define INA3221_BABORD_0 0
-#define INA3221_CUVES_1 1
-#define INA3221_TRIBORD_2 2
-#define INA3221_OTHERS_3 3
+#define INA3221_BABORD_0 0                                // I2C address = 0x40 GND
+#define INA3221_CUVES_1 1                                 // I2C address = 0x41 SDA
+#define INA3221_TRIBORD_2 2                               // I2C address = 0x42 SCL
+#define INA3221_OTHERS_3 3                                // I2C address = 0x43 VS
 #define INA3221_NB 4
 
 // RPM sensors PC817
@@ -117,7 +117,8 @@ const String sk_path_engines[ENGINE_NB][ENGINE_SK_PATH_NB] = {
 const String sk_path_windlass = "navigation.anchor.rodeDeployed";
 const String sk_path_motion[2] = { "navigation.attitude", "navigation.headingMagnetic" };
 
-// Constants for SensESP Configuration
+// SensESP Configuration
+const String conf_path_global = "/CONFIG/SENSORS_CONFIG";
 const String conf_path_volt[INA3221_NB][INA3221_CH_NUM] = {
         {"/CONFIG/BABORD/INA3221/0/LINEAR_CH1",   "/CONFIG/BABORD/INA3221/0/LINEAR_CH2",  "/CONFIG/BABORD/INA3221/0/LINEAR_CH3"},
         {"/CONFIG/CUVES/INA3221/1/LINEAR_CH1",    "/CONFIG/CUVES/INA3221/1/LINEAR_CH2",   "/CONFIG/CUVES/INA3221/1/LINEAR_CH3"},
@@ -127,6 +128,7 @@ const String conf_path_engines[ENGINE_NB] = {"/CONFIG/BABORD/PC817/FREQUENCY_RPM
 const String conf_path_chain[CHAIN_COUNTER_NB] = { "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
 const float gipsy_circum = 0.43982;                           // Windlass gipsy circumference (meter)
 const unsigned int read_delay = 1000;                         // Sensors read delay = 1s
+ConfigSensESP *sensesp_config;                                // Sensors activation
 
 // Engines state and timer (in seconds) to power-down sensors
 enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE, STATE };
@@ -434,24 +436,27 @@ void setupTemperatureSensors() {
     sensor_temp[i] = new OneWireTemperature(dts, read_delay);
     sensor_temp[i]->to_json(jsonsensor);
 
-    if (jsonsensor["found"] == true)
+    if (jsonsensor["found"].is<bool>() && (jsonsensor["found"] == true))
       switch (getTemperatureSensorLocation(jsonsensor["address"])) {
         case DS18B20_BABORD_0 : {
-          sensor_temp[DS18B20_BABORD_0]
-            ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_BABORD_0], "",
-                        new SKMetadata("K", "Echappt Babord", sk_path_temp[DS18B20_BABORD_0], "T° Echappement Moteur Babord")));
+          if (sensesp_config->is_enabled("DS18B20_BABORD_0"))
+            sensor_temp[DS18B20_BABORD_0]
+              ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_BABORD_0], "",
+                          new SKMetadata("K", "Echappt Babord", sk_path_temp[DS18B20_BABORD_0], "T° Echappement Moteur Babord")));
           break;
         }
         case DS18B20_TRIBORD_1 : {
-          sensor_temp[DS18B20_TRIBORD_1]
-            ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_TRIBORD_1], "",
-                        new SKMetadata("K", "Echappt Tribord", sk_path_temp[DS18B20_TRIBORD_1], "T° Echappement Moteur Tribord")));
+          if (sensesp_config->is_enabled("DS18B20_TRIBORD_1"))
+            sensor_temp[DS18B20_TRIBORD_1]
+              ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_TRIBORD_1], "",
+                          new SKMetadata("K", "Echappt Tribord", sk_path_temp[DS18B20_TRIBORD_1], "T° Echappement Moteur Tribord")));
           break;
         }
         case DS18B20_COMMON_2 : {
-          sensor_temp[DS18B20_COMMON_2]
-            ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_COMMON_2], "",
-                        new SKMetadata("K", "Compartiment Moteur", sk_path_temp[DS18B20_COMMON_2], "T° Compartiment Moteur")));
+          if (sensesp_config->is_enabled("DS18B20_COMMON_2"))
+            sensor_temp[DS18B20_COMMON_2]
+              ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_COMMON_2], "",
+                          new SKMetadata("K", "Compartiment Moteur", sk_path_temp[DS18B20_COMMON_2], "T° Compartiment Moteur")));
           break;
         }
         default : {
@@ -495,11 +500,11 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine, float Vin, fl
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1],
                     new SKMetadata("K", "T° Eau " + engine, "Coolant temperature", "Temp " + engine)));
   ConfigItem(sensor_volt_divider_CH1)
-    ->set_title("Température Eau")
+    ->set_title("Température Eau - " + engine)
     ->set_description("T° Eau - INA3221_CH1 - VoltageDividerR2")
     ->set_sort_order(UI_ORDER_ENGINE);
   ConfigItem(sensor_volt_coolanttemp)
-    ->set_title("Température Eau")
+    ->set_title("Température Eau - " + engine)
     ->set_description("T° Eau - INA3221_CH1 - CoolantTemperature")
     ->set_sort_order(UI_ORDER_ENGINE+1);
   #ifdef DEBUG_MODE
@@ -517,11 +522,11 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine, float Vin, fl
     ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2],
                     new SKMetadata("Pa", "Pression Huile " + engine, "Oil pressure", "Huile " + engine)));
   ConfigItem(sensor_volt_divider_CH2)
-    ->set_title("Pression Huile")
+    ->set_title("Pression Huile - " + engine)
     ->set_description("Pression Huile - INA3221_CH2 - VoltageDividerR2")
     ->set_sort_order(UI_ORDER_ENGINE+2);
   ConfigItem(sensor_volt_oilpressure)
-    ->set_title("Pression Huile")
+    ->set_title("Pression Huile - " + engine)
     ->set_description("Pression Huile - INA3221_CH2 - OilPressure")
     ->set_sort_order(UI_ORDER_ENGINE+3);
   #ifdef DEBUG_MODE
@@ -697,10 +702,14 @@ void setupVoltageSensors() {
   const float R1 = 1.0; // 120
   boolean sensorFound[INA3221_NB] = {false, false, false, false};
 
-  sensorFound[INA3221_BABORD_0] = setupSensorINA3221(INA3221_BABORD_0, INA3221_ADDR40_GND);
-  sensorFound[INA3221_CUVES_1] = setupSensorINA3221(INA3221_CUVES_1, INA3221_ADDR41_VCC);
-  sensorFound[INA3221_TRIBORD_2] = setupSensorINA3221(INA3221_TRIBORD_2, INA3221_ADDR42_SDA);
-  sensorFound[INA3221_OTHERS_3] = setupSensorINA3221(INA3221_OTHERS_3, INA3221_ADDR43_SCL);
+  if (sensesp_config->is_enabled("INA3221_BABORD_0"))
+    sensorFound[INA3221_BABORD_0] = setupSensorINA3221(INA3221_BABORD_0, INA3221_ADDR40_GND);
+  if (sensesp_config->is_enabled("INA3221_CUVES_1"))
+    sensorFound[INA3221_CUVES_1] = setupSensorINA3221(INA3221_CUVES_1, INA3221_ADDR41_VCC);
+  if (sensesp_config->is_enabled("INA3221_TRIBORD_2"))
+    sensorFound[INA3221_TRIBORD_2] = setupSensorINA3221(INA3221_TRIBORD_2, INA3221_ADDR42_SDA);
+  if (sensesp_config->is_enabled("INA3221_OTHERS_3"))
+    sensorFound[INA3221_OTHERS_3] = setupSensorINA3221(INA3221_OTHERS_3, INA3221_ADDR43_SCL);
 
   if (sensorFound[INA3221_BABORD_0]) {
     sensor_volt[INA3221_BABORD_0][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH1);
@@ -731,7 +740,8 @@ void setupVoltageSensors() {
     sensor_volt[INA3221_OTHERS_3][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_OTHERS3_CH2);
     sensor_volt[INA3221_OTHERS_3][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_OTHERS3_CH3);
     
-    setupVoltageChainSensors();
+    if (sensesp_config->is_enabled("CHAIN_COUNTER_FEATURE"))
+      setupVoltageChainSensors();
   }
 }
 
@@ -800,14 +810,49 @@ SKMetadata getEnginesSKMetadata() {
   #ifdef DEBUG_MODE
   else
       Serial.println("JSON : Condition KO");
-
-  String jsonify;
-  serializeJsonPretty(jsondoc, jsonify);
-  Serial.print("JSON :");
-  Serial.println(jsonify);
+      String jsonify;
+      serializeJsonPretty(jsondoc, jsonify);
+      Serial.print("JSON :");
+      Serial.println(jsonify);
   #endif
 
   return *engine_skmeta;
+}
+
+// Setup the PC817 sensor for engine RPM
+void setupPC817Sensor(u_int8_t engine_id, String engine, u_int8_t PC817_pin) {
+  // Step 1 : calibrate the multiplier with known values (CurveInterpolator class) from analog gauge
+  //const float multiplier = 1.0 / 97.0;
+  const float multiplier = 1.0;
+  const unsigned int read_rpm_delay = 1000;
+  EngineDataTransform *engine_data = new EngineDataTransform(multiplier, conf_path_engines[engine_id], engine_id);
+
+  // Step 2 : instanciates DigitalInputCounter to read PC817 sensor values
+  #ifndef FAKE_MODE
+  sensor_engine[engine_id] = new DigitalInputCounter(PC817_pin, INPUT, RISING, read_rpm_delay);    // INPUT for GPIO 34-35 or INPUT_PULLUP for others pins
+  #else
+  sensor_engine[engine_id] = new FloatConstantSensor(50.0, 1, "/config/engine/EL817/CONSTANT");   // Fake sensor for test purpose
+  #endif
+
+  // Step 3 : connects the output of sensor to the input of Frequency() and the Signal K output as a float in Hz
+  sensor_engine[engine_id]
+    ->connect_to(engine_data->freq)
+    //->connect_to(engine_data->moving_avg)
+    ->connect_to(new SKOutputFloat(sk_path_engines[engine_id][REVOLUTIONS], 
+                  new SKMetadata("Hz", "Moteur " + engine, "Engine revolutions (x60 for RPM)", "RPM")));
+
+  // Step 4 : transforms the output of Frequency to RPM and Liter per hour from FuelConsumption
+  engine_data->freq
+    ->connect_to(engine_data->hz_to_rpm)
+    ->connect_to(engine_data->rpm_to_lhr)
+    ->connect_to(engine_data->lhr_to_m3s)
+    ->connect_to(new SKOutputFloat(sk_path_engines[engine_id][FUELRATE],
+                  new SKMetadata("m3/s", "Conso " + engine, "Fuel rate of consumption", "L/hr")));
+
+  // Step 5 : changes the engine state if needed
+  engine_data->freq
+    ->connect_to(engine_data->running_state)
+    ->connect_to(new SKOutputBool(sk_path_engines[engine_id][STATE]));
 }
 
 /* Measure Engines RPM
@@ -819,56 +864,10 @@ SKMetadata getEnginesSKMetadata() {
   AQAD41 example: 60 divided with FlyWheel To W Ratio (60 / 14,7 = 4,08)
 */
 void setupRPMSensors() {
-  // Step 1 : calibrate the multiplier with known values (CurveInterpolator class) from analog gauge
-  //const float multiplier = 1.0 / 97.0;
-  const float multiplier = 1.0;
-  const unsigned int read_rpm_delay = 1000;
-
-  EngineDataTransform *engine_babord = new EngineDataTransform(multiplier, conf_path_engines[ENGINE_BABORD], ENGINE_BABORD);
-  EngineDataTransform *engine_tribord = new EngineDataTransform(multiplier, conf_path_engines[ENGINE_TRIBORD], ENGINE_TRIBORD);
-
-  // Step 2 : instanciate DigitalInputCounter to read PC817 sensor values
-  #ifndef FAKE_MODE
-  sensor_engine[ENGINE_BABORD] = new DigitalInputCounter(PC817_BABORD_PIN, INPUT, RISING, read_rpm_delay);    // INPUT for GPIO 34-35 or INPUT_PULLUP for others pins
-  sensor_engine[ENGINE_TRIBORD] = new DigitalInputCounter(PC817_TRIBORD_PIN, INPUT, RISING, read_rpm_delay);  // INPUT for GPIO 34-35 or INPUT_PULLUP for others pins
-  #else
-  sensor_engine[ENGINE_BABORD] = new FloatConstantSensor(50.0, 1, "/config/BABORD/EL817/CONSTANT");   // Fake sensor for test purpose
-  sensor_engine[ENGINE_TRIBORD] = new FloatConstantSensor(60.0, 1, "/config/TRIBORD/EL817/CONSTANT"); // Fake sensor for test purpose
-  #endif
-
-  // Step 3 : connect the output of sensor to the input of Frequency() and the Signal K output as a float in Hz
-  sensor_engine[ENGINE_BABORD]
-    ->connect_to(engine_babord->freq)
-    //->connect_to(engine_babord->moving_avg)
-    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_BABORD][REVOLUTIONS], 
-                  new SKMetadata("Hz", "Moteur Babord", "Engine revolutions (x60 for RPM)", "RPM")));
-  sensor_engine[ENGINE_TRIBORD]
-    ->connect_to(engine_tribord->freq)
-    //->connect_to(engine_tribord->moving_avg)
-    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_TRIBORD][REVOLUTIONS],
-                  new SKMetadata("Hz", "Moteur Tribord", "Engine revolutions (x60 for RPM)", "RPM")));
-
-  // Step 4 : transforms the output of Frequency to RPM and Liter per hour from FuelConsumption
-  engine_babord->freq
-    ->connect_to(engine_babord->hz_to_rpm)
-    ->connect_to(engine_babord->rpm_to_lhr)
-    ->connect_to(engine_babord->lhr_to_m3s)
-    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_BABORD][FUELRATE],
-                  new SKMetadata("m3/s", "Conso Babord", "Fuel rate of consumption", "L/hr")));
-  engine_tribord->freq
-    ->connect_to(engine_tribord->hz_to_rpm)
-    ->connect_to(engine_tribord->rpm_to_lhr)
-    ->connect_to(engine_tribord->lhr_to_m3s)
-    ->connect_to(new SKOutputFloat(sk_path_engines[ENGINE_TRIBORD][FUELRATE],
-                  new SKMetadata("m3/s", "Conso Tribord", "Fuel rate of consumption", "L/hr")));
-
-  // Step 5 : change the engine state if needed
-  engine_babord->freq
-    ->connect_to(engine_babord->running_state)
-    ->connect_to(new SKOutputBool(sk_path_engines[ENGINE_BABORD][STATE]));
-  engine_tribord->freq
-    ->connect_to(engine_tribord->running_state)
-    ->connect_to(new SKOutputBool(sk_path_engines[ENGINE_TRIBORD][STATE]));
+    if (sensesp_config->is_enabled("PC817_BABORD"))
+      setupPC817Sensor(ENGINE_BABORD, "Babord", PC817_BABORD_PIN);
+    if (sensesp_config->is_enabled("PC817_TRIBORD"))
+      setupPC817Sensor(ENGINE_TRIBORD, "Tribord", PC817_TRIBORD_PIN);
 }
 
 // Motion Sensor
@@ -930,16 +929,16 @@ void setupMotionSensor() {
     #endif
     sensor_compass->connect_to(new SKOutputFloat(sk_path_motion[MPU9250_HEADING],
                   new SKMetadata("rad", "Cap compas", "Current magnetic heading received from the compass", "Cap compas")));
-  } 
+  }
+  #ifdef DEBUG_MODE
   else {
-    #ifdef DEBUG_MODE
     Serial.print(F("DMP Initialization failed (code ")); // Print the error code
     Serial.print(devStatus);
     Serial.println(F(")"));
     // 1 = initial memory load failed
     // 2 = DMP configuration updates failed
-    #endif
   }
+  #endif
 }
 
 // The setup function performs one-time application initialization.
@@ -954,11 +953,16 @@ void setup() {
   // Create the global SensESPApp() object.
   SensESPAppBuilder builder;
   sensesp_app = builder.set_hostname("birchwood-ESP32")->get_app();
+  sensesp_config = new ConfigSensESP(conf_path_global);
 
-  setupTemperatureSensors();
-  setupVoltageSensors();
-  setupRPMSensors();
-  //setupMotionSensor();
+  if (sensesp_config->is_enabled("DS18B20_FEATURE"))
+    setupTemperatureSensors();
+  if (sensesp_config->is_enabled("INA3221_FEATURE"))
+    setupVoltageSensors();
+  if (sensesp_config->is_enabled("PC817_FEATURE"))
+    setupRPMSensors();
+  if (sensesp_config->is_enabled("MOTION_SENSOR_FEATURE"))
+    setupMotionSensor();
 }
 
 // The loop function is called in an endless loop during program execution.
