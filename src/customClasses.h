@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.8
-  @date 21/01/2025
+  @version 1.0.9
+  @date 28/01/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -36,6 +36,14 @@ using namespace sensesp;
 typedef LambdaTransform<float, float, float, float> LinearPos;
 typedef LambdaTransform<float, boolean, u_int8_t> EngineState;
 
+// Keys for enable / disable sensors in the configuration UI
+const char* sensor_keys[] = {
+      "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
+      "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
+      "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
+      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE"
+ };
+
 // Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
 auto linearPositive = [](float input, float multiplier, float offset) -> float {
   if (input > 0)
@@ -48,9 +56,9 @@ const ParamInfo* linerPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Mult
 // Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
 auto runningState = [](float input, u_int8_t engine_id) -> boolean {
   #if ENGINE_SLEEP_ENABLE == 1
-    sleepModeINA3221(engine_id, ((input > 1) ? ENGINE_STATE_RUNNING : ENGINE_STATE_NOT_RUNNING));
+  sleepModeINA3221(engine_id, ((input > 1) ? ENGINE_STATE_RUNNING : ENGINE_STATE_NOT_RUNNING));
   #endif
-    return (input > 0);
+  return (input > 0);
 };
 const ParamInfo* runningState_ParamInfo = new ParamInfo[1]{{"engine_state", "Engine State"}};
 
@@ -220,22 +228,11 @@ class ConfigSensESP : public SensorConfig {
   ConfigSensESP(const String& config_path) : SensorConfig(config_path) {
     // Load current configuration otherwise set default values to true for all sensors
     if (!load()) {
-      config_json["DS18B20_FEATURE"] = true;
-      config_json["DS18B20_BABORD_0"] = true;
-      config_json["DS18B20_TRIBORD_1"] = true;
-      config_json["DS18B20_COMMON_2"] = true;
-      config_json["INA3221_FEATURE"] = true;
-      config_json["INA3221_BABORD_0"] = true;
-      config_json["INA3221_CUVES_1"] = true;
-      config_json["INA3221_TRIBORD_2"] = true;
-      config_json["INA3221_OTHERS_3"] = true;
-      config_json["PC817_FEATURE"] = true;
-      config_json["PC817_BABORD"] = true;
-      config_json["PC817_TRIBORD"] = true;
-      config_json["CHAIN_COUNTER_FEATURE"] = true;
-      config_json["MOTION_SENSOR_FEATURE"] = true;
+      for (const char* key : sensor_keys)
+        config_json[key] = true;
       save();
     }
+
     // Initialize ConfigItem instance with custom ConfigSchema
     ConfigItem(this)->set_title("Sensors Configuration")
                     ->set_description("Enable or disable sensors by group or individually. Restart to apply any changes.")
@@ -253,14 +250,7 @@ class ConfigSensESP : public SensorConfig {
 
   // Set configuration to a JSON file
   bool to_json(JsonObject& root) override { 
-    const char* keys[] = {
-      "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
-      "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
-      "INA3221_OTHERS_3", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
-      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE"
-    };
-
-    for (const char* key : keys)
+    for (const char* key : sensor_keys)
       if (config_json[key].is<bool>())
         root[key] = config_json[key];
       else
@@ -271,14 +261,7 @@ class ConfigSensESP : public SensorConfig {
 
   // Get configuration from the JSON file
   bool from_json(const JsonObject& root) override {
-    const char* keys[] = {
-      "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
-      "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
-      "INA3221_OTHERS_3", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
-      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE"
-    };
-
-    for (const char* key : keys)
+    for (const char* key : sensor_keys)
       if (root[key].is<bool>())
         config_json[key] = root[key];
       else
@@ -300,6 +283,7 @@ class ConfigSensESP : public SensorConfig {
     return conf_path_global;
   }
 
+  // Return the configuration schema
   const String get_config_schema() {
     return R"({
       "type": "object",
@@ -313,6 +297,7 @@ class ConfigSensESP : public SensorConfig {
         "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
         "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
         "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Others" },
+        "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
         "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
         "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
         "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
@@ -326,7 +311,7 @@ class ConfigSensESP : public SensorConfig {
   JsonDocument config_json;
 };
 
-// Set default config schema for ConfigSensESP
+// Set default configuration schema for ConfigSensESP
 const String ConfigSchema(const ConfigSensESP& obj) {
   return R"({
     "type": "object",
@@ -340,6 +325,7 @@ const String ConfigSchema(const ConfigSensESP& obj) {
       "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
       "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
       "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Others" },
+      "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
       "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
       "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
       "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
