@@ -24,8 +24,8 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.8
-  @date 21/01/2025
+  @version 1.0.9
+  @date 28/01/2025
   @ref SensESP v3.0.0
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -40,7 +40,7 @@
 #include <sensesp/sensors/digital_input.h>
 #include <sensesp/signalk/signalk_output.h>
 #include <sensesp_onewire/onewire_temperature.h>
-#include <string>
+//#include <string>
 #include "MPU6050_6Axis_MotionApps20.h"
 //https://github.com/jrowberg/i2cdevlib/tree/master/Arduino/MPU9250
 //https://registry.platformio.org/libraries/mbed-anything-connected/MPU9250/installation
@@ -383,18 +383,23 @@ float getCompassSensorValue() {
   [POWERDOWN]   [ACTIVE]
 */
 void sleepModeINA3221(u_int8_t engine_id, u_int8_t powerdown_mode) {
+  u_int8_t INA3221_id = ((engine_id == ENGINE_BABORD) ? INA3221_BABORD_0 : INA3221_TRIBORD_2);
+
+  if (!sensesp_config->is_enabled("INA3221_POWERDOWN"))
+    return;                                                   // Do not power-down the INA3221 if the feature is disabled
+
   if (engine_state[engine_id] == ENGINE_STATE_OFF) {          // Engine is off
     if (powerdown_mode == ENGINE_STATE_RUNNING) {
       engine_state[engine_id] |= powerdown_mode;
       engine_timer[engine_id] = ENGINE_SLEEP_TIMER * 1000 / read_delay; // Reset the timer
-      sensor_INA3221[engine_id]->setModeContinious();         // INA3221 is now active
+      sensor_INA3221[INA3221_id]->setModeContinious();        // INA3221 is now active
       #ifdef DEBUG_MODE
       Serial.printf("ENGINE : id = %i | state = %#05x -> WAKE UP\n", engine_id, engine_state[engine_id]);
       #endif
     }
     else if (engine_timer[engine_id] == 0) {                  // INA3221 is going to power-down
         engine_timer[engine_id] = -1;                         // Disable the timer
-        sensor_INA3221[engine_id]->setModePowerDown();        // INA3221 is now in power-down mode
+        sensor_INA3221[INA3221_id]->setModePowerDown();       // INA3221 is now in power-down mode
         #ifdef DEBUG_MODE
         Serial.printf("ENGINE : id = %i | state = %#05x -> POWER DOWN\n", engine_id, engine_state[engine_id]);
         #endif
