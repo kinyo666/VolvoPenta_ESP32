@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.9
-  @date 28/01/2025
+  @version 1.0.10
+  @date 19/04/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -41,7 +41,7 @@ const char* sensor_keys[] = {
       "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
       "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
       "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
-      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE"
+      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE", "RUDDER_ANGLE_FEATURE"
  };
 
 // Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
@@ -51,7 +51,7 @@ auto linearPositive = [](float input, float multiplier, float offset) -> float {
   else
     return (0.0f);
 };
-const ParamInfo* linerPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
+const ParamInfo* linearPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
 
 // Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
 auto runningState = [](float input, u_int8_t engine_id) -> boolean {
@@ -119,10 +119,27 @@ class OilPressure : public CurveInterpolator {
     // Populate a lookup table to translate the ohm values returned by the oil pressure sender to bar
     clear_samples();
     // addSample(CurveInterpolator::Sample(knownOhmValue, knownBar));
+    /*
     add_sample(CurveInterpolator::Sample(10, 0.0));
     add_sample(CurveInterpolator::Sample(52, 2.0));
     add_sample(CurveInterpolator::Sample(88, 4.0));
     add_sample(CurveInterpolator::Sample(124, 6.0));
+    */
+    /* @link https://www.14point7.com/products/solid-afr-gauge
+      PSI	0	14,5	29	43,5	58	72,5	87	101,5	116	130,5	145
+      Ω	3	17	34	51	68	85	102	119	133	147	160
+    */
+    add_sample(CurveInterpolator::Sample(3, 0.0));    // 0 PSI = 0 bar
+    add_sample(CurveInterpolator::Sample(17, 1.0));   // 14.5 PSI = 1 bar
+    add_sample(CurveInterpolator::Sample(34, 2.0));   // 29 PSI = 2 bar
+    add_sample(CurveInterpolator::Sample(51, 3.0));   // 43.5 PSI = 3 bar
+    add_sample(CurveInterpolator::Sample(68, 4.0));   // 58 PSI = 4 bar
+    add_sample(CurveInterpolator::Sample(85, 5.0));   // 72.5 PSI = 5 bar
+    add_sample(CurveInterpolator::Sample(102, 6.0));  // 87 PSI = 6 bar
+    add_sample(CurveInterpolator::Sample(119, 7.0));  // 101.5 PSI = 7 bar
+    add_sample(CurveInterpolator::Sample(133, 8.0));  // 116 PSI = 8 bar
+    add_sample(CurveInterpolator::Sample(147, 9.0));  // 130.5 PSI = 9 bar
+    add_sample(CurveInterpolator::Sample(160, 10.0)); // 145 PSI = 10 bar
   }
 };
 
@@ -155,8 +172,8 @@ class EngineDataTransform {
         rpm_to_lhr = new FuelConsumption();                                 // RPM to Liter per Hour (l/hr)
         //lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
         lhr_to_m3s = new LinearPos(linearPositive, 1 / (3.6 * pow(10, 6)), 
-                                  0.0, linerPositive_ParamInfo);            // Liter per Hour (l/hr) to Meter cube per second (m3/s)
-        moving_avg = new MovingAverage(2, 1.0);                             // Moving average with 2 samples
+                                  0.0, linearPositive_ParamInfo);           // Liter per Hour (l/hr) to Meter cube per second (m3/s)
+        moving_avg = new MovingAverage(4, 1.0);                             // Moving average with 4 samples
         running_state = new EngineState(runningState, engine_id, 
                                         runningState_ParamInfo);            // Hertz (Hz) to running state (true or false)
 
@@ -167,9 +184,146 @@ class EngineDataTransform {
                           "If Ratio is unknown, the original Tachometer might have a max Impulses/min written on it, divide that with max rpm on the meter and you\'ll get the ratio. Tachometer 860420 is marked with 73500Imp/min and has a scale to 5000rpm. 73500 divided with 5000 equals 14,7, Tada!"\
                           "If above multiplier needs to be recalculated, the FuelMultipliers needs to be recalculated as well, they're both based on AQAD41 values right now."\
                           "AQAD41 example: 60 divided with FlyWheel To W Ratio (60 / 14,7 = 4,08)")
-        ->set_sort_order(25);
+        ->set_sort_order(25+(2*engine_id));
+
+        // TODO : add a ConfigItem for moving_avg
+        /*
+        ConfigItem(moving_avg)
+        ->set_title("Compte-tours - MovingAvg " + conf_path_engine)
+        ->set_description("Moving average of the engine RPM to smooth out the signal."\
+                          "Default value is 4 samples.")
+        ->set_sort_order(26+(2*engine_id));
+        */
       }
 };
+
+// MovingAverage class to calculate the average offset of a quaternion over a number of samples
+class MovingAverageOffsetQuaternion : public Transform<Quaternion, String> {
+  public:
+  MovingAverageOffsetQuaternion(int num_samples = 6, const String& config_path = "")
+     : Transform<Quaternion, String>(config_path), sample_size_{num_samples}, initialized_(false), saved_(false) {
+      bufX_.resize(sample_size_, 0);
+      bufY_.resize(sample_size_, 0);
+      bufZ_.resize(sample_size_, 0);
+      outputX_ = 0.0;
+      outputY_ = 0.0;
+      outputZ_ = 0.0;
+      conf_motionsensor = jdoc_conf_motionsensor.to<JsonObject>();
+
+      this->load();
+  }
+
+  void set(const Quaternion& input) {
+    // So the first value to be included in the average doesn't default to 0.0
+    if (!initialized_) {
+      bufX_.assign(sample_size_, input.x);
+      bufY_.assign(sample_size_, input.y);
+      bufZ_.assign(sample_size_, input.z);
+      outputX_ = input.x;
+      outputY_ = input.y;
+      outputZ_ = input.z;
+      initialized_ = true;
+    } else {
+      // Subtract 1/nth of the oldest value and add 1/nth of the newest value
+      outputX_ += -bufX_[ptr_] / sample_size_;
+      outputX_ += input.x / sample_size_;
+      outputY_ += -bufY_[ptr_] / sample_size_;
+      outputY_ += input.y / sample_size_;
+      outputZ_ += -bufZ_[ptr_] / sample_size_;
+      outputZ_ += input.z / sample_size_;
+  
+      // Save the most recent input, then advance to the next storage location.
+      // When storage location n is reached, start over again at 0.
+      bufX_[ptr_] = input.x;
+      bufY_[ptr_] = input.y;
+      bufZ_[ptr_] = input.z;
+      ptr_ = (ptr_ + 1) % sample_size_;
+
+      // Save the average value to the configuration file
+      if ((ptr_ == 0) && (!saved_)) {
+        this->save();
+        saved_ = true;
+
+        // TODO : remove this line
+        #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+        Serial.printf("MOTION SENSOR OFFSET SAVED : X_OFFSET = %f\t| Y_OFFSET = %f\t| Z_OFFSET = %f\n", outputX_, outputY_, outputZ_);
+        #endif
+      }
+    }
+
+    conf_motionsensor["x_offset"] = outputX_;
+    conf_motionsensor["y_offset"] = outputY_;
+    conf_motionsensor["z_offset"] = outputZ_;    
+    serializeJsonPretty(conf_motionsensor, output_);
+    notify();
+  }
+
+  void reset() { 
+    bufX_.assign(sample_size_, 0);
+    bufY_.assign(sample_size_, 0);
+    bufZ_.assign(sample_size_, 0);
+    ptr_ = 0;
+    initialized_ = false;
+    saved_ = false;
+    outputX_ = 0.0;
+    outputY_ = 0.0;
+    outputZ_ = 0.0;
+  }
+
+  bool to_json(JsonObject& doc) {
+    doc["sample_size"] = sample_size_;
+    doc["x_offset"] = outputX_;
+    doc["y_offset"] = outputY_;
+    doc["z_offset"] = outputZ_;
+    return true;
+  }
+
+  bool from_json(const JsonObject& config) {
+    if (!config["x_offset"].is<float>())
+      return false;
+
+    outputX_ = config["x_offset"].is<float>() ? config["x_offset"] : 0.0;
+    outputY_ = config["y_offset"].is<float>() ? config["y_offset"] : 0.0;
+    outputZ_ = config["z_offset"].is<float>() ? config["z_offset"] : 0.0;
+    sample_size_ = config["sample_size"].is<int>() ? config["sample_size"] : 6;
+
+    return true;
+  }
+
+  float getXOffset() const { return outputX_; }
+  float getYOffset() const { return outputY_; }
+  float getZOffset() const { return outputZ_; }
+
+  private:
+  std::vector<float> bufX_{};
+  std::vector<float> bufY_{};
+  std::vector<float> bufZ_{};
+  float outputX_;
+  float outputY_; 
+  float outputZ_;
+  int ptr_ = 0;
+  int sample_size_;
+  bool saved_;
+  bool initialized_;
+  JsonDocument jdoc_conf_motionsensor;
+  JsonObject conf_motionsensor;                                 // MPU X/Y/Z offsets values if exists
+};
+
+const String ConfigSchema(const MovingAverageOffsetQuaternion& obj) {
+  return R"({
+    "type": "object",
+    "properties": {
+        "sample_size": { "title": "Sample Size", "type": "number" },
+        "x_offset": { "title": "X Offset", "type": "number" },
+        "y_offset": { "title": "Y Offset", "type": "number" },
+        "z_offset": { "title": "Z Offset", "type": "number" }
+    }
+  })";
+  }
+  
+  inline bool ConfigRequiresRestart(const MovingAverageOffsetQuaternion& obj) {
+    return true;
+  }
 
 // Override Integrator class with persistent last value and k multiplier configuration
 class PersistentIntegrator : public Transform<int, float> {
@@ -278,6 +432,11 @@ class ConfigSensESP : public SensorConfig {
       return false;
   }
 
+  // Set the status of a sensor (key) to enabled or disabled
+  void set_status(String key, bool status) {
+    config_json[key] = status;
+  }
+
   // Return the configuration path
   const String& get_config_path() {
     return conf_path_global;
@@ -296,13 +455,15 @@ class ConfigSensESP : public SensorConfig {
         "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
         "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
         "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
-        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Others" },
+        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Windlass + Rudder Angle" },
         "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
         "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
         "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
         "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
         "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "Chain Counter Feature" },
-        "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" }
+        "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
+        "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
+        "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
       }
     })";
   }
@@ -330,7 +491,9 @@ const String ConfigSchema(const ConfigSensESP& obj) {
       "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
       "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
       "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "Chain Counter Feature" },
-      "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" }
+      "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
+      "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
+      "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
     }
   })";
 }
