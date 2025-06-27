@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.10
-  @date 19/04/2025
+  @version 1.0.11
+  @date 28/06/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -197,133 +197,130 @@ class EngineDataTransform {
       }
 };
 
-// MovingAverage class to calculate the average offset of a quaternion over a number of samples
-class MovingAverageOffsetQuaternion : public Transform<Quaternion, String> {
+// Class to handle motion sensor offsets for MPU6050
+class MotionSensorOffsets : public Transform<String, String> {
   public:
-  MovingAverageOffsetQuaternion(int num_samples = 6, const String& config_path = "")
-     : Transform<Quaternion, String>(config_path), sample_size_{num_samples}, initialized_(false), saved_(false) {
-      bufX_.resize(sample_size_, 0);
-      bufY_.resize(sample_size_, 0);
-      bufZ_.resize(sample_size_, 0);
-      outputX_ = 0.0;
-      outputY_ = 0.0;
-      outputZ_ = 0.0;
+  MotionSensorOffsets(const String& config_path = "")
+     : Transform<String, String>(config_path) {
       conf_motionsensor = jdoc_conf_motionsensor.to<JsonObject>();
-
-      this->load();
+      valid_offset = this->load();
   }
 
-  void set(const Quaternion& input) {
-    // So the first value to be included in the average doesn't default to 0.0
-    if (!initialized_) {
-      bufX_.assign(sample_size_, input.x);
-      bufY_.assign(sample_size_, input.y);
-      bufZ_.assign(sample_size_, input.z);
-      outputX_ = input.x;
-      outputY_ = input.y;
-      outputZ_ = input.z;
-      initialized_ = true;
-    } else {
-      // Subtract 1/nth of the oldest value and add 1/nth of the newest value
-      outputX_ += -bufX_[ptr_] / sample_size_;
-      outputX_ += input.x / sample_size_;
-      outputY_ += -bufY_[ptr_] / sample_size_;
-      outputY_ += input.y / sample_size_;
-      outputZ_ += -bufZ_[ptr_] / sample_size_;
-      outputZ_ += input.z / sample_size_;
-  
-      // Save the most recent input, then advance to the next storage location.
-      // When storage location n is reached, start over again at 0.
-      bufX_[ptr_] = input.x;
-      bufY_[ptr_] = input.y;
-      bufZ_[ptr_] = input.z;
-      ptr_ = (ptr_ + 1) % sample_size_;
-
-      // Save the average value to the configuration file
-      if ((ptr_ == 0) && (!saved_)) {
-        this->save();
-        saved_ = true;
-
-        // TODO : remove this line
-        #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
-        Serial.printf("MOTION SENSOR OFFSET SAVED : X_OFFSET = %f\t| Y_OFFSET = %f\t| Z_OFFSET = %f\n", outputX_, outputY_, outputZ_);
-        #endif
-      }
+  void set(const String input) {
+    // Convert the input string "ax|ay|..." to float values
+    float values[6];
+    char *input_cstr = const_cast<char*>(input.c_str());
+    char* token = strtok(input_cstr, "|");
+    int idx = 0;
+    while (token != NULL && idx < 6) {
+      values[idx++] = atof(token);
+      token = strtok(NULL, "|");
     }
 
-    conf_motionsensor["x_offset"] = outputX_;
-    conf_motionsensor["y_offset"] = outputY_;
-    conf_motionsensor["z_offset"] = outputZ_;    
+    // JSON object to store the motion sensor offsets
+    conf_motionsensor["ax_offset"] = values[0];
+    conf_motionsensor["ay_offset"] = values[1];
+    conf_motionsensor["az_offset"] = values[2];
+    conf_motionsensor["gx_offset"] = values[3];
+    conf_motionsensor["gy_offset"] = values[4];
+    conf_motionsensor["gz_offset"] = values[5];
+
+    // Update the VectorFloat objects with the new offsets
+    accel_offset.x = values[0];
+    accel_offset.y = values[1];
+    accel_offset.z = values[2];
+    gyro_offset.x = values[3];
+    gyro_offset.y = values[4];
+    gyro_offset.z = values[5];
+    
+    // Save the updated configuration to the file system
     serializeJsonPretty(conf_motionsensor, output_);
     notify();
+    valid_offset = this->save();
+    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+    Serial.printf("MOTION SENSOR OFFSET SAVED : Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ",
+                  values[0], values[1], values[2]);
+    Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", values[3], values[4], values[5]);
+    #endif
   }
 
   void reset() { 
-    bufX_.assign(sample_size_, 0);
-    bufY_.assign(sample_size_, 0);
-    bufZ_.assign(sample_size_, 0);
-    ptr_ = 0;
-    initialized_ = false;
-    saved_ = false;
-    outputX_ = 0.0;
-    outputY_ = 0.0;
-    outputZ_ = 0.0;
+    accel_offset.x = 0.0;
+    accel_offset.y = 0.0;
+    accel_offset.z = 0.0;
+    gyro_offset.x = 0.0;
+    gyro_offset.y = 0.0;
+    gyro_offset.z = 0.0;
+    valid_offset = false;
   }
 
   bool to_json(JsonObject& doc) {
-    doc["sample_size"] = sample_size_;
-    doc["x_offset"] = outputX_;
-    doc["y_offset"] = outputY_;
-    doc["z_offset"] = outputZ_;
+    doc["ax_offset"] = accel_offset.x;
+    doc["ay_offset"] = accel_offset.y;
+    doc["az_offset"] = accel_offset.z;
+    doc["gx_offset"] = gyro_offset.x;
+    doc["gy_offset"] = gyro_offset.y;
+    doc["gz_offset"] = gyro_offset.z;
     return true;
   }
 
   bool from_json(const JsonObject& config) {
-    if (!config["x_offset"].is<float>())
+    if (!config["ax_offset"].is<float>() || !config["ay_offset"].is<float>() || !config["az_offset"].is<float>() ||
+        !config["gx_offset"].is<float>() || !config["gy_offset"].is<float>() || !config["gz_offset"].is<float>())
       return false;
 
-    outputX_ = config["x_offset"].is<float>() ? config["x_offset"] : 0.0;
-    outputY_ = config["y_offset"].is<float>() ? config["y_offset"] : 0.0;
-    outputZ_ = config["z_offset"].is<float>() ? config["z_offset"] : 0.0;
-    sample_size_ = config["sample_size"].is<int>() ? config["sample_size"] : 6;
+    accel_offset.x = config["ax_offset"];
+    accel_offset.y = config["ay_offset"];
+    accel_offset.z = config["az_offset"];
+    gyro_offset.x = config["gx_offset"];
+    gyro_offset.y = config["gy_offset"];
+    gyro_offset.z = config["gz_offset"];
 
+    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+    Serial.printf("MOTION SENSOR OFFSET FROM JSON : Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ",
+                  accel_offset.x, accel_offset.y, accel_offset.z);
+    Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
+    #endif
     return true;
   }
 
-  float getXOffset() const { return outputX_; }
-  float getYOffset() const { return outputY_; }
-  float getZOffset() const { return outputZ_; }
+  bool is_valid() const {
+    return valid_offset;
+  }
+
+  VectorFloat getAccelOffset() const {
+    return accel_offset;
+  }
+
+  VectorFloat getGyroOffset() const {
+    return gyro_offset;
+  }
 
   private:
-  std::vector<float> bufX_{};
-  std::vector<float> bufY_{};
-  std::vector<float> bufZ_{};
-  float outputX_;
-  float outputY_; 
-  float outputZ_;
-  int ptr_ = 0;
-  int sample_size_;
-  bool saved_;
-  bool initialized_;
   JsonDocument jdoc_conf_motionsensor;
   JsonObject conf_motionsensor;                                 // MPU X/Y/Z offsets values if exists
+  VectorFloat accel_offset;                                     // Acceleration X/Y/Z offset values
+  VectorFloat gyro_offset;                                      // Gyroscope X/Y/Z offset values
+  bool valid_offset = false;                                    // Flag to indicate if the offsets are valid
 };
 
-const String ConfigSchema(const MovingAverageOffsetQuaternion& obj) {
+const String ConfigSchema(const MotionSensorOffsets& obj) {
   return R"({
     "type": "object",
     "properties": {
-        "sample_size": { "title": "Sample Size", "type": "number" },
-        "x_offset": { "title": "X Offset", "type": "number" },
-        "y_offset": { "title": "Y Offset", "type": "number" },
-        "z_offset": { "title": "Z Offset", "type": "number" }
+        "ax_offset": { "title": "Accel X Offset", "type": "number" },
+        "ay_offset": { "title": "Accel Y Offset", "type": "number" },
+        "az_offset": { "title": "Accel Z Offset", "type": "number" },
+        "gx_offset": { "title": "Gyro X Offset", "type": "number" },
+        "gy_offset": { "title": "Gyro Y Offset", "type": "number" },
+        "gz_offset": { "title": "Gyro Z Offset", "type": "number" }
     }
   })";
   }
   
-  inline bool ConfigRequiresRestart(const MovingAverageOffsetQuaternion& obj) {
-    return true;
-  }
+inline bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {
+  return true;
+}
 
 // Override Integrator class with persistent last value and k multiplier configuration
 class PersistentIntegrator : public Transform<int, float> {
