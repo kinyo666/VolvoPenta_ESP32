@@ -1,7 +1,6 @@
 /*
   @TODO :
   P0
-  - Calculer les offsets du capteur MPU6050
   - Ajouter un contrôle de la valeur avec CHAIN_LIMIT_LOW et CHAIN_LIMIT HIGH ?
   - Intégrer la lib MPU9250
 
@@ -25,8 +24,8 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.10
-  @date 22/04/2025
+  @version 1.0.11
+  @date 28/06/2025
   @ref SensESP v3.1.0
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -98,10 +97,10 @@
 #define UI_ORDER_CHAIN 40
 #define UI_ORDER_MOTION 50
 
-// Motion sensor MPU9050
-#define MPU9050_ATTITUDE 0
-#define MPU9050_HEADING 1
-#define MPU9050_OFFSETS 2
+// Motion sensor MPU6050
+#define MPU6050_ATTITUDE 0
+#define MPU6050_HEADING 1
+#define MPU6050_OFFSETS 2
 
 // Local languages
 #define LANG_EN 0
@@ -167,13 +166,13 @@ boolean chain_counter_saved = true;                           // Trigger to save
 // Motion and compass sensor
 MPU6050 sensor_mpu;                                           // 1 MPU-6050 Motion sensor
 RepeatSensor<String> *sensor_motion;                          // MPU Motion values
-PersistingObservableValue<String> *sensor_motion_offsets;     // MPU Offsets values
+//PersistingObservableValue<String> *sensor_motion_offsets;     // MPU Offsets values
 #ifndef FAKE_MODE
 RepeatSensor<float> *sensor_compass;                          // MPU Compass values
 #else
 FloatConstantSensor *sensor_compass;                          // Fake Compass values
 #endif
-MovingAverageOffsetQuaternion *sensor_motion_avg;             // Moving average of the motion sensor offsets
+MotionSensorOffsets *sensor_motion_offsets;                     // MPU Offsets values
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
@@ -341,6 +340,9 @@ void handleChainCounterChange() {
   }
 }
 
+// Callback for motion sensor Yaw/Pitch/Roll
+// @param q Quaternion with X, Y, Z values
+// @return JSON String with Yaw, Pitch, Roll values in radians
 String getMotionSensorYPR(Quaternion q) {
   VectorFloat gravity;    // [x, y, z]            Gravity vector
   float ypr[3];           // [yaw, pitch, roll]   Yaw/Pitch/Roll container
@@ -348,7 +350,6 @@ String getMotionSensorYPR(Quaternion q) {
   JsonDocument json_doc;  // JSON radian values
   String json;
   JsonObject value = json_doc.to<JsonObject>();
-
   
   // Read a packet from FIFO
   if ((q.x != 0) && (q.y != 0) && (q.z != 0)) {
@@ -373,6 +374,8 @@ String getMotionSensorYPR(Quaternion q) {
   return json;
 }
 
+// Callback for motion sensor quaternion
+// @return Quaternion with X, Y, Z values
 Quaternion getMotionSensorQuaternion() {
   Quaternion q;
   uint8_t FIFOBuffer[64]; // FIFO storage buffer
@@ -399,7 +402,6 @@ String getMotionSensorValues() {
   JsonDocument json_doc;  // JSON radian values
   String json;
   JsonObject value = json_doc.to<JsonObject>();
-
 
   // Read a packet from FIFO
   if (sensor_mpu.dmpGetCurrentFIFOPacket(FIFOBuffer)) { // Get the Latest packet 
@@ -430,8 +432,8 @@ String getMotionSensorValues() {
   return json;
 }
 
-// Callback for compass sensor
-// @return Heading value in radian
+// Callback for compass sensor)
+// @return Fake heading value in radian
 float getCompassSensorValue() {
   return 100.0;
 }
@@ -988,24 +990,77 @@ void setupRPMSensors() {
     #endif
 }
 
-// Set offsets for the gyro sensors
-void setMotionSensorGyroOffsets() {
-  int16_t x_gyro_offset = static_cast<int16_t>(sensor_motion_avg->getXOffset() * 1000); // Scale as needed
-  int16_t y_gyro_offset = static_cast<int16_t>(sensor_motion_avg->getYOffset() * 1000);
-  int16_t z_gyro_offset = static_cast<int16_t>(sensor_motion_avg->getZOffset() * 1000);
+// Set offsets for the motion sensor
+void setMotionSensorOffsets() {
+  VectorFloat accel_offset = sensor_motion_offsets->getAccelOffset();
+  VectorFloat gyro_offset = sensor_motion_offsets->getGyroOffset();
 
   // Set offsets
-  sensor_mpu.setXGyroOffset(x_gyro_offset);
-  sensor_mpu.setYGyroOffset(y_gyro_offset);
-  sensor_mpu.setZGyroOffset(z_gyro_offset);
+  sensor_mpu.setXAccelOffset(accel_offset.x);
+  sensor_mpu.setYAccelOffset(accel_offset.y);
+  sensor_mpu.setZAccelOffset(accel_offset.z);
+  sensor_mpu.setXGyroOffset(gyro_offset.x);
+  sensor_mpu.setYGyroOffset(gyro_offset.y);
+  sensor_mpu.setZGyroOffset(gyro_offset.z);
 
-  Serial.printf("MOTION SENSOR OFFSET LOADED : X_OFFSET = %f\t| Y_OFFSET = %f\t| Z_OFFSET = %f\n", x_gyro_offset, y_gyro_offset, z_gyro_offset);
+  #ifdef DEBUG_MODE
+    Serial.printf("MOTION SENSOR OFFSET LOADED : Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ",
+                  accel_offset.x, accel_offset.y, accel_offset.z);
+    Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
+  #endif
 }
 
-// Motion Sensor
+// Calibrate the motion sensor MPU6050
+void calibrateMotionSensor() {
+  int16_t *motion_sensor_offsets;     // Gyro offsets for the MPU6050
+  
+  // Reset the MPU6050 offsets to 0 before calibration
+  sensor_mpu.setXGyroOffset(0);
+  sensor_mpu.setYGyroOffset(0);
+  sensor_mpu.setZGyroOffset(0);
+  sensor_mpu.setXAccelOffset(0);
+  sensor_mpu.setYAccelOffset(0);
+  sensor_mpu.setZAccelOffset(0);
+
+  sensor_mpu.CalibrateAccel(6);                           // Calibration Time: generate offsets and calibrate our MPU6050
+  sensor_mpu.CalibrateGyro(6);
+
+  motion_sensor_offsets = sensor_mpu.GetActiveOffsets();  // Get the active offsets from the MPU6050
+
+  #ifdef DEBUG_MODE
+  Serial.println("Active offsets : ");
+  //	A_OFFSET_H_READ_A_OFFS(Data);
+  Serial.printf("Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ", 
+        (float) motion_sensor_offsets[0],
+        (float) motion_sensor_offsets[1],
+        (float) motion_sensor_offsets[2]);
+  //	XG_OFFSET_H_READ_OFFS_USR(Data);
+  Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", 
+        (float) motion_sensor_offsets[3],
+        (float) motion_sensor_offsets[4],
+        (float) motion_sensor_offsets[5]);
+  #endif
+
+  // Convert the offsets to a string
+  String motion_string_offsets = String(motion_sensor_offsets[0]) + "|" +
+    String(motion_sensor_offsets[1]) + "|" +
+    String(motion_sensor_offsets[2]) + "|" +
+    String(motion_sensor_offsets[3]) + "|" +
+    String(motion_sensor_offsets[4]) + "|" +
+    String(motion_sensor_offsets[5]);
+
+  // Sends the offsets to the Signal K server and save the motion sensor offsets
+  StringConstantSensor *sensor_string_offsets = new StringConstantSensor(motion_string_offsets, 600);
+  sensor_motion_offsets = new MotionSensorOffsets(conf_path_motion);
+  sensor_string_offsets->connect_to(sensor_motion_offsets);
+  sensor_motion_offsets->connect_to(new SKOutputRawJson(sk_path_motion[MPU6050_OFFSETS]));
+}
+
+// Setup the motion sensor MPU6050
+// This function initializes the MPU6050 motion sensor, calibrates it if needed, and sets the offsets.
 // @link https://registry.platformio.org/libraries/electroniccats/MPU6050
 void setupMotionSensor() {
-  uint8_t devStatus;          // Return status after each device operation (0 = success, !0 = error)
+  uint8_t devStatus;                  // Return status after each device operation (0 = success, !0 = error)
 
   #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
     Wire.setPins(21, 22);
@@ -1032,53 +1087,41 @@ void setupMotionSensor() {
   // Initializate and configure the DMP
   Serial.println(F("Initializing DMP..."));
   devStatus = sensor_mpu.dmpInitialize();
-  sensor_motion_avg = new MovingAverageOffsetQuaternion(6, conf_path_motion + "/MOVING_AVERAGE_OFFSET");
   
-  // Supply your gyro offsets here, scaled for min sensitivity
-  //sensor_mpu.setXGyroOffset(0);
-  //sensor_mpu.setYGyroOffset(0);
-  //sensor_mpu.setZGyroOffset(0);
-  sensor_mpu.setXAccelOffset(0);
-  sensor_mpu.setYAccelOffset(0);
-  sensor_mpu.setZAccelOffset(0);
-  setMotionSensorGyroOffsets(); // Set gyro offsets using the saved values
-
   // Making sure it worked (returns 0 if so)
   if (devStatus == 0) {
-    sensor_mpu.CalibrateAccel(6);         // Calibration Time: generate offsets and calibrate our MPU6050
-    sensor_mpu.CalibrateGyro(6);
-    Serial.println("Active offsets : ");
-    sensor_mpu.PrintActiveOffsets();
+    sensor_motion_offsets = new MotionSensorOffsets(conf_path_motion);
+
+    if (sensesp_config->is_enabled("MOTION_SENSOR_CALIBRATE") || !sensor_motion_offsets->is_valid())
+      calibrateMotionSensor();
+    setMotionSensorOffsets();         // Set offsets using the saved values or the calibrated values
+
+    // Make the offsets editable in the SensESP UI
+    ConfigItem(sensor_motion_offsets)
+      ->set_title("Gyroscope - Offsets")
+      ->set_description("Offsets - MPU6050 - MotionSensorOffsets")
+      ->set_sort_order(UI_ORDER_MOTION);
+
     Serial.print(F("Enabling DMP..."));   // Turning ON DMP
     sensor_mpu.setDMPEnabled(true);
     Serial.println(F("DMP ready !"));
     uint16_t packetSize = sensor_mpu.dmpGetFIFOPacketSize(); // Get expected DMP packet size for later comparison
 
     //sensor_motion = new RepeatSensor<String>(read_delay, getMotionSensorValues);
-    //sensor_motion->connect_to((new SKOutputRawJson(sk_path_motion[MPU9050_ATTITUDE])));
+    //sensor_motion->connect_to((new SKOutputRawJson(sk_path_motion[MPU6050_ATTITUDE])));
 
     // TEST
     RepeatSensor<Quaternion> *sensor_motion_quaternion = new RepeatSensor<Quaternion>(read_delay, getMotionSensorQuaternion);
     LambdaTransform<Quaternion, String> *sensor_motion_ypr = new LambdaTransform<Quaternion, String>(getMotionSensorYPR);
     sensor_motion_quaternion->connect_to(sensor_motion_ypr);
-    sensor_motion_ypr->connect_to(new SKOutputRawJson(sk_path_motion[MPU9050_ATTITUDE]));
-
-    if (sensesp_config->is_enabled("MOTION_SENSOR_CALIBRATE")) {
-      sensor_motion_quaternion->connect_to(sensor_motion_avg);
-      sensor_motion_avg->connect_to(new SKOutputRawJson(sk_path_motion[MPU9050_OFFSETS]));
-
-      ConfigItem(sensor_motion_avg)
-      ->set_title("Gyroscope - Offsets")
-      ->set_description("Offsets - MPU9050 - MovingAverageOffsetQuaternion")
-      ->set_sort_order(UI_ORDER_MOTION);
-    }
+    sensor_motion_ypr->connect_to(new SKOutputRawJson(sk_path_motion[MPU6050_ATTITUDE]));
 
     #ifndef FAKE_MODE
     sensor_compass = new RepeatSensor<float>(read_delay, getCompassSensorValue);
     #else
     sensor_compass = new FloatConstantSensor(1.0, read_delay);
     #endif
-    sensor_compass->connect_to(new SKOutputFloat(sk_path_motion[MPU9050_HEADING],
+    sensor_compass->connect_to(new SKOutputFloat(sk_path_motion[MPU6050_HEADING],
                   new SKMetadata("rad", "Cap compas", "Current magnetic heading received from the compass", "Cap compas")));
   }
   #ifdef DEBUG_MODE
