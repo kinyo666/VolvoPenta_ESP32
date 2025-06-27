@@ -18,18 +18,31 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   - [x] Bilge temperature
   - [x] Motion sensor (roll, pitch, yaw)
   - [ ] Autopilot
+  - [ ] Rudder Angle
+
+  ESP32 special features :
+  - [x] INA3221 auto sleeping mode (power down)
+  - [x] MPU6050 auto calibrating (persistent offset)
+  - [x] Global features enabling / disabling by checkbox
+  - [x] Run-time configuration (Wifi AP / webserver)
+
+  > [!WARNING]
+  > The run-time configuration is stored in the ESP32's flash memory and overrides the compile-time values.
+  > This feature is very useful because it allows you to change any value and restart the ESP32 to apply the new configuration without any coding.
+  > Since there is no 'ls -all' or 'dir' command, be careful when adding a new configuration path or using an existing one as it can create conflicts and unexpected behaviour.
 
 ## WHAT YOU NEED
 ### MUST-HAVE
 - ESP32 Wroom32
-- INA3221 volt sensors (x3)
+- INA3221 volt sensors (x4)
 - DS18B20 temperature sensors (x3)
 - PC817 rpm sensors (x2)
 - MPU6050 or MPU9250 motion sensor (x1)
 - Wifi Access Point (AP) where your ESP32 will connect to
-- [Signal K](http://signalk.org) Server running on you local network with plugins (KIP, ...)
 - [Visual Code Studio](https://code.visualstudio.com/) with [PlatformIO](https://platformio.org/) plugin
-- [SensESP SDK](https://github.com/SignalK/SensESP) (>= 3.0.0)
+- [Git Cli](https://cli.github.com/) (>= 2.74.2)
+- [Signal K](http://signalk.org) Server running on you local network with plugins (KIP, ...)
+- [SensESP SDK](https://github.com/SignalK/SensESP) (>= 3.1.0)
 
 ### NICE TO HAVE
 - [Raspberry Pi](https://www.raspberrypi.com/products/) (4B or 5) - Signal K server, InfluxDB and Grafana
@@ -38,7 +51,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 
 ## HOW TO INSTALL
 1. Edit the library dependencies in [platformio.ini](/platformio.ini) :
-  ```lib_deps = SignalK/SensESP@^3.0.0
+  ```lib_deps = SignalK/SensESP@^3.1.0
         SensESP/OneWire@^3.0.2
         tinyu-zhao/INA3221@^0.0.1
         electroniccats/MPU6050@^1.4.1
@@ -52,6 +65,29 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   ```
 
 3. Download this code or fetch the repository :
+- [GitHub > kinyo666/Capteurs_ESP32](https://github.com/kinyo666/Capteurs_ESP32) - Source code for ESP32
+
+> [!IMPORTANT]
+> Some key elements need to be customized to fit your setup :
+> - Change the 1-wire addresses to those of your DS18B20 sensors in the source code
+> - Check the pin number to match with your physical setup
+> - The global constants with suffix _NB are used to defined the number of elements in each array, change it carefully to fit your needs (e.g 1 or 2 engines)
+
+4. Build the firmware and upload it to your ESP32 :
+- Visual Studio > Terminal > Run Build Task PlatformIO: Build (or use the checkmark icon at the bottom)
+- Visual Studio > Terminal > Run Task > PlatformIO: Upload (or use the right arrow icon at the bottom)
+
+5. Configure your ESP32 module
+- Connect to the ESP32 Wifi Access Point (default : SSID = “SensESP”, Password = “thisisfine”) with your smartphone or laptop
+- Configure the SSID / Password for the Raspberry Pi Wifi connection (or your router for testing purpose)
+- Configure the IP address / port of Signal K server (default : mDNS, port 3000)
+- Save the configuration
+- Launch SignalK on your Raspberry Pi (or PC for testing purpose), go to Security > Access Request to modify the Authentication Timeout (set it to NEVER) of your ESP32 and click on Approve
+- Check whether your ESP32 is now showing up in the connected devices list
+
+> [!TIP]
+> If your ESP32 is up but it can't connect to the Signal K server, check if there is a firewall or antivirus blocking the connection
+> On Windows, sometimes you will have to disable the Microsoft Defender on your local private network to let the ESP32 use mDNS
 
 _TO DO_
 `overview.md`
