@@ -38,6 +38,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - DS18B20 temperature sensors (x3)
 - PC817 rpm sensors (x2)
 - MPU6050 or MPU9250 motion sensor (x1)
+- Reed switch with magnet from a cycling computer wired (e.g Sigma) or burglar alarm (x1)
 - Wifi Access Point (AP) where your ESP32 will connect to
 - [Visual Code Studio](https://code.visualstudio.com/) with [PlatformIO](https://platformio.org/) plugin
 - [Git Cli](https://cli.github.com/) (>= 2.74.2)
@@ -48,6 +49,12 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - [Raspberry Pi](https://www.raspberrypi.com/products/) (4B or 5) - Signal K server, InfluxDB and Grafana
 - [InfluxDB OSS](https://www.influxdata.com/downloads/) (>= 2.7.10) - Store Signal K values
 - [Grafana OSS](https://grafana.com/grafana/download?pg=get&plcmt=selfmanaged-box1-cta1&edition=oss) (>= 11.3.0) - Visualize the InfluxDB data
+
+## HARDWARE SETUP
+
+> [!CAUTION]
+> The ESP32 MUST be connected to the same 12V electrical circuit as your boat.
+> If not, the INA3221 sensors HAVE TO to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings.
 
 ## HOW TO INSTALL
 1. Edit the library dependencies in [platformio.ini](/platformio.ini) :
@@ -89,6 +96,8 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 > [!TIP]
 > If your ESP32 is up but unable to connect to the Signal K server, check if a firewall or antivirus program is blocking the connection. 
 > On Windows, you may need to disable Microsoft Defender on your local private network to allow the ESP32 to use mDNS / server discovery
+
+
 
 _TO DO_
 `overview.md`
