@@ -51,27 +51,28 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 
 ## HOW TO INSTALL
 1. Edit the library dependencies in [platformio.ini](/platformio.ini) :
-  ```lib_deps = SignalK/SensESP@^3.1.0
+  ```
+  lib_deps = SignalK/SensESP@^3.1.0
         SensESP/OneWire@^3.0.2
         tinyu-zhao/INA3221@^0.0.1
         electroniccats/MPU6050@^1.4.1
   ```
 2. Adjust the build_flags in [platformio.ini](/platformio.ini) :
-  ```build_flags = 
+  ```
+  build_flags = 
     -D LED_BUILTIN=2
     -D CORE_DEBUG_LEVEL=ARDUHAL_LOG_LEVEL_VERBOSE
     -D TAG='"Arduino"'
     -D USE_ESP_IDF_LOG
   ```
 
-3. Download this code or fetch the repository :
-- [GitHub > kinyo666/Capteurs_ESP32](https://github.com/kinyo666/Capteurs_ESP32) - Source code for ESP32
+3. Download this code or fetch the repository [GitHub > kinyo666/Capteurs_ESP32](https://github.com/kinyo666/Capteurs_ESP32)
 
 > [!IMPORTANT]
-> Some key elements need to be customized to fit your setup :
-> - Change the 1-wire addresses to those of your DS18B20 sensors in the source code
-> - Check the pin number to match with your physical setup
-> - The global constants with suffix _NB are used to defined the number of elements in each array, change it carefully to fit your needs (e.g 1 or 2 engines)
+> Some key elements need to be customized to suit your configuration :
+> - Replace the 1-wire addresses with those of your DS18B20 sensors in the source code
+> - Check that the pin number matches with your physical setup
+> - Global constants with the _NB suffix are used to define the number of elements in each array, change them carefully to suit your needs (e.g 1 or 2 engines)
 
 4. Build the firmware and upload it to your ESP32 :
 - Visual Studio > Terminal > Run Build Task PlatformIO: Build (or use the checkmark icon at the bottom)
@@ -86,8 +87,8 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - Check whether your ESP32 is now showing up in the connected devices list
 
 > [!TIP]
-> If your ESP32 is up but it can't connect to the Signal K server, check if there is a firewall or antivirus blocking the connection
-> On Windows, sometimes you will have to disable the Microsoft Defender on your local private network to let the ESP32 use mDNS
+> If your ESP32 is up but unable to connect to the Signal K server, check if a firewall or antivirus program is blocking the connection
+> On Windows, you may need to disable Microsoft Defender on your local private network to allow the ESP32 to use mDNS / server discovery
 
 _TO DO_
 `overview.md`
