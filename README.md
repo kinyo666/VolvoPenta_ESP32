@@ -87,7 +87,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - Check whether your ESP32 is now showing up in the connected devices list
 
 > [!TIP]
-> If your ESP32 is up but unable to connect to the Signal K server, check if a firewall or antivirus program is blocking the connection
+> If your ESP32 is up but unable to connect to the Signal K server, check if a firewall or antivirus program is blocking the connection. 
 > On Windows, you may need to disable Microsoft Defender on your local private network to allow the ESP32 to use mDNS / server discovery
 
 _TO DO_
