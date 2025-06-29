@@ -100,23 +100,3 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 > [!TIP]
 > If your ESP32 is up but unable to connect to the Signal K server, check if a firewall or antivirus program is blocking the connection. 
 > On Windows, you may need to disable Microsoft Defender on your local private network to allow the ESP32 to use mDNS / server discovery
-
-
-
-_TO DO_
-`overview.md`
-`{{site.path}}`
-> [!NOTE]
-> Useful information that users should know, even when skimming content.
-
-> [!TIP]
-> Helpful advice for doing things better or more easily.
-
-> [!IMPORTANT]
-> Key information users need to know to achieve their goal.
-
-> [!WARNING]
-> Urgent info that needs immediate user attention to avoid problems.
-
-> [!CAUTION]
-> Advises about risks or negative outcomes of certain actions.
