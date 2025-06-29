@@ -4,6 +4,7 @@ This is the ESP32 part of the project to digitize Volvo Penta TAMD40 marine engi
 It is sized to fit with 2 TAMD engines (portside and starboard) but can easily be restricted to only one.
 > [!NOTE]
 > This code is also suitable for others Volvo Penta TAMD/TMD/AQAD engines but haven't been tested.
+> The hardware configuration allows you to continue using the analog dashboard without any disruption
 ## FEATURES
   Digital dashboard :
   - [x] Coolant temperature
@@ -16,13 +17,14 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   - [x] Fresh water tank level
   - [x] Exhaust temperature
   - [x] Bilge temperature
+  - [ ] Bilge water level
   - [x] Motion sensor (roll, pitch, yaw)
   - [ ] Autopilot
-  - [ ] Rudder Angle
-
+  - [X] Rudder Angle
+  
   ESP32 special features :
-  - [x] INA3221 auto sleeping mode (power down)
-  - [x] MPU6050 auto calibrating (persistent offset)
+  - [x] INA3221 auto sleep mode (power down / energy saving)
+  - [x] MPU6050 auto calibration (persistent offset)
   - [x] Global features enabling / disabling by checkbox
   - [x] Run-time configuration (Wifi AP / webserver)
 
@@ -30,6 +32,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   > The run-time configuration is stored in the ESP32's flash memory and overrides the compile-time values.
   > This feature is very useful because it allows you to change any value and restart the ESP32 to apply the new configuration without any coding.
   > Since there is no 'ls -all' or 'dir' command, be careful when adding a new configuration path or using an existing one as it can create conflicts and unexpected behaviour.
+  > Values MUST be calibrated before using at sea.
 
 ## WHAT YOU NEED
 ### MUST-HAVE
@@ -51,7 +54,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - [Grafana OSS](https://grafana.com/grafana/download?pg=get&plcmt=selfmanaged-box1-cta1&edition=oss) (>= 11.3.0) - Visualize the InfluxDB data
 
 ## HARDWARE SETUP
-
+![Schéma_v7](https://github.com/user-attachments/assets/6006ebc8-a7bc-456a-aaca-7ce9d4a54592)
 > [!CAUTION]
 > The ESP32 MUST be connected to the same 12V electrical circuit as your boat.
 > If not, the INA3221 sensors HAVE TO to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings.
