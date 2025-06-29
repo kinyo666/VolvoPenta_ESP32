@@ -29,10 +29,10 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   - [x] Run-time configuration (Wifi AP / webserver)
 
   > [!WARNING]
-  > The run-time configuration is stored in the ESP32's flash memory and overrides the compile-time values.
-  > This feature is very useful because it allows you to change any value and restart the ESP32 to apply the new configuration without any coding.
-  > Since there is no 'ls -all' or 'dir' command, be careful when adding a new configuration path or using an existing one as it can create conflicts and unexpected behaviour.
-  > Values MUST be calibrated before using at sea.
+  > - The run-time configuration is stored in the ESP32's flash memory and overrides the compile-time values.
+  > - This feature is very useful because it allows you to change any value and restart the ESP32 to apply the new configuration without any coding.
+  > - Since there is no 'ls -all' or 'dir' command, be careful when adding a new configuration path or using an existing one as it can create conflicts and unexpected behaviour.
+  > - Values MUST be calibrated before using at sea.
 
 ## WHAT YOU NEED
 ### MUST-HAVE
@@ -56,8 +56,8 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 ## HARDWARE SETUP
 ![Schéma_v7](https://github.com/user-attachments/assets/6006ebc8-a7bc-456a-aaca-7ce9d4a54592)
 > [!CAUTION]
-> The ESP32 MUST be connected to the same 12V electrical circuit as your boat.
-> If not, the INA3221 sensors HAVE TO to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings.
+> - The ESP32 MUST be connected to the same 12V electrical circuit as your boat.
+> - If not, the sensors HAVE TO to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings.
 
 ## HOW TO INSTALL
 1. Edit the library dependencies in [platformio.ini](/platformio.ini) :
@@ -83,6 +83,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 > - Replace the 1-wire addresses with those of your DS18B20 sensors in the source code
 > - Check that the pin number matches with your physical setup
 > - Global constants with the _NB suffix are used to define the number of elements in each array, change them carefully to suit your needs (e.g 1 or 2 engines)
+> - Values MUST be calibrated before using at sea
 
 4. Build the firmware and upload it to your ESP32 :
 - Visual Studio > Terminal > Run Build Task PlatformIO: Build (or use the checkmark icon at the bottom)
