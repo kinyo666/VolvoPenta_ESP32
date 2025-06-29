@@ -24,8 +24,8 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.11
-  @date 28/06/2025
+  @version 1.0.12
+  @date 29/06/2025
   @ref SensESP v3.1.0
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -176,18 +176,6 @@ MotionSensorOffsets *sensor_motion_offsets;                     // MPU Offsets v
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
-
-/*
-// Callback for Linear Positive (Linear Transform which returns 0.0 if not positive)
-float (*LinearPositive::function_)(float, float, float) =
-    [](float input, float multiplier, float offset) {
-      if (input > 0)
-        return multiplier * input + offset;
-      else
-        return (0.0f);
-    };
-const ParamInfo LinearPositive::param_info_[] = {{"multiplier", "Multiplier"}, {"offset", "Offset"}};
-*/
 
 // Filter Kelvin values out of range
 auto filterKelvinValues = [](float input, float offset = 273.15, float max = 413.1) -> float {
@@ -413,11 +401,6 @@ String getMotionSensorValues() {
     value["pitch"] = ypr[1];      // Pitch / Tangage
     value["yaw"] = ypr[0];        // Yaw / Lacet
 
-    if (sensesp_config->is_enabled("MOTION_SENSOR_CALIBRATE")) {
-      Serial.printf("MOTION SENSOR : Calibrate X = %f\t| Y = %f\t| Z = %f\n", q.x, q.y, q.z);
-      // TODO : enregistrer les valeurs de calibration en mode persistent
-    }
-
     #ifdef DEBUG_MODE
       Serial.printf("MOTION SENSOR : Yaw = %f°\t| Pitch = %f°\t| Roll = %f°\n", ypr[0] * 180/M_PI, ypr[1] * 180/M_PI, ypr[2] * 180/M_PI);
     #endif
@@ -432,10 +415,10 @@ String getMotionSensorValues() {
   return json;
 }
 
-// Callback for compass sensor)
+// Callback for compass sensor
 // @return Fake heading value in radian
 float getCompassSensorValue() {
-  return 100.0;
+  return 2.094395;      // 120°
 }
 
 /* Callback for setting INA3221 device in active or power-down mode when engine is off
@@ -553,10 +536,8 @@ void setupTemperatureSensors() {
 void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine) {
   LinearPos *sensor_volt_linearpos_volt2k = new LinearPos(linearPositive, 1.0, 0.0, linearPositive_ParamInfo,
                                                       conf_path_volt[INA3221_Id][INA3221_CH1] + "/LINEAR_POSITIVE");
-  //LinearPos *sensor_volt_linearpos_bar2pa = new LinearPos(linearPositive, pow(10, 5), 0.0, linearPositive_ParamInfo,
-  //                                                     conf_path_volt[INA3221_Id][INA3221_CH2] + "/LINEAR_BAR_TO_PA");
   LinearPos *sensor_volt_linearpos_volt2pa = new LinearPos(linearPositive, pow(10, 5) * 1.46, -0.776, linearPositive_ParamInfo,
-                                                       conf_path_volt[INA3221_Id][INA3221_CH3] + "/LINEAR_POSITIVE");
+                                                       conf_path_volt[INA3221_Id][INA3221_CH2] + "/LINEAR_POSITIVE");
 
   // Coolant temperature
   sensor_volt[INA3221_Id][INA3221_CH1]
@@ -619,88 +600,6 @@ void setupVoltageTankSensor(u_int8_t INA3221_channel, String location, String ty
   #endif
 }
 
-// Setup the INA3221 Voltage sensors for fuel / water tanks
-// @param Vin Volt input (12V)
-// @param R1 Known resistance in ohm (0.1 ohm for INA3221, 160 ohms for VDO gauge)
-// @deprecated Use setupVoltageTankSensor function for each sensor instead
-void setupVoltageTankSensors(float Vin, float R1) {
-  // 1. Take the maximum analog input value (i.e. value when sensor is at the high end)
-  // 2. Divide 1 by max value. In my case: 1 / 870 = 0.001149425
-  // Assuming the resistance is 3-180 ohms for VDO / Veritron gauge
-  VoltageDividerR2 *sensor_volt_divider_CH1 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/VOLTAGE_DIVIDER");
-  VoltageDividerR2 *sensor_volt_divider_CH2 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/VOLTAGE_DIVIDER");
-  VoltageDividerR2 *sensor_volt_divider_CH3 = new VoltageDividerR2(R1, Vin, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/VOLTAGE_DIVIDER");
-  LinearPos *sensor_volt_linearpos_CH1 = new LinearPos(linearPositive, 1.0, 0.0, linearPositive_ParamInfo,
-                                                       conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/LINEAR_POSITIVE");
-  LinearPos *sensor_volt_linearpos_CH2 = new LinearPos(linearPositive, 1.0, 0.0, linearPositive_ParamInfo,
-                                                       conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/LINEAR_POSITIVE");
-  LinearPos *sensor_volt_linearpos_CH3 = new LinearPos(linearPositive, 1.0, 0.0, linearPositive_ParamInfo,
-                                                       conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/LINEAR_POSITIVE");
-
-  // Fuel tank volume on portside
-  sensor_volt[INA3221_CUVES_1][INA3221_CH1]
-    ->connect_to(sensor_volt_divider_CH1)
-    ->connect_to(sensor_volt_linearpos_CH1)
-    //->connect_to(new LinearPositive(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/LINEAR_POSITIVE"))
-    ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH1] + "/MOVING_AVERAGE"))
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH1],
-                  new SKMetadata("m3", "Cuve Babord", "Niveau carburant Babord", "Cuve Babord")));
-  ConfigItem(sensor_volt_divider_CH1)
-    ->set_title("Cuve Babord")
-    ->set_description("Cuve Babord - INA3221_CH1 - VoltageDividerR2")
-    ->set_sort_order(UI_ORDER_TANK);
-  ConfigItem(sensor_volt_linearpos_CH1)
-    ->set_title("Cuve Babord")
-    ->set_description("Cuve Babord - INA3221_CH1 - LinearPositive")
-    ->set_sort_order(UI_ORDER_TANK+1);
-  #ifdef DEBUG_MODE
-  sensor_volt[INA3221_CUVES_1][INA3221_CH1]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH1] + ".raw"));
-  #endif
-
-  // Fuel tank volume on starboard
-  sensor_volt[INA3221_CUVES_1][INA3221_CH2]
-    ->connect_to(sensor_volt_divider_CH2)
-    ->connect_to(sensor_volt_linearpos_CH2)
-    //->connect_to(new LinearPositive(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/LINEAR_POSITIVE"))
-    ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH2] + "/MOVING_AVERAGE"))
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH2],
-                  new SKMetadata("m3", "Cuve Tribord", "Niveau carburant Tribord", "Cuve Tribord")));
-  ConfigItem(sensor_volt_divider_CH2)
-    ->set_title("Cuve Tribord")
-    ->set_description("Cuve Tribord - INA3221_CH2 - VoltageDividerR2")
-    ->set_sort_order(UI_ORDER_TANK+2);
-  ConfigItem(sensor_volt_linearpos_CH2)
-    ->set_title("Cuve Tribord")
-    ->set_description("Cuve Tribord - INA3221_CH2 - LinearPositive")
-    ->set_sort_order(UI_ORDER_TANK+3);
-  #ifdef DEBUG_MODE
-  sensor_volt[INA3221_CUVES_1][INA3221_CH2]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH2] + ".raw"));
-  #endif
-
-  // Water tank volume
-  sensor_volt[INA3221_CUVES_1][INA3221_CH3]
-    ->connect_to(sensor_volt_divider_CH3)
-    ->connect_to(sensor_volt_linearpos_CH3)
-    //->connect_to(new LinearPositive(1.0, 0.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/LINEAR_POSITIVE"))
-    ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_CH3] + "/MOVING_AVERAGE"))
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH3],
-                  new SKMetadata("m3", "Cuve Eau douce", "Niveau eau douce", "Cuve Eau")));
-  ConfigItem(sensor_volt_divider_CH3)
-    ->set_title("Cuve Eau douce")
-    ->set_description("Cuve Eau douce - INA3221_CH3 - VoltageDividerR2")
-    ->set_sort_order(UI_ORDER_TANK+4);
-  ConfigItem(sensor_volt_linearpos_CH3)
-    ->set_title("Cuve Eau douce")
-    ->set_description("Cuve Eau douce - INA3221_CH3 - LinearPositive")
-    ->set_sort_order(UI_ORDER_TANK+5);
-  #ifdef DEBUG_MODE
-  sensor_volt[INA3221_CUVES_1][INA3221_CH3]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_CH3] + ".raw"));
-  #endif
-}
-
 // Setup the INA3221 Voltage sensor for rudder angle
 void setupVoltageRudderAngleSensor() {
   LinearPos *sensor_volt_linearpos = new LinearPos(linearPositive, 1.0, 0.0, linearPositive_ParamInfo,
@@ -726,8 +625,8 @@ void setupVoltageChainSensors() {
   chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, conf_path_chain[CHAIN_COUNTER_PATH]);  // Chain counter in meter
 
   // Do not use DigitalInputDebounceCounter as it is unfinished in SensESP 3.0.0
-  DigitalInputCounter *sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP, 
-                                                                RISING, read_delay);                 // Count pulses per revolution
+  DigitalInputCounter *sensor_windlass = new DigitalInputCounter(CHAIN_COUNTER_PIN, INPUT_PULLUP,    
+                                                                RISING, read_delay);                 // Count pulses per revolution (GPIO32 = pull-up)
   DebounceInt *chain_debounce = new DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY]);
 
   chain_counter->to_json(conf_windlass);                                                             // Retrieve last saved value if exists
@@ -923,6 +822,7 @@ SKMetadata getEnginesSKMetadata() {
 }
 
 // Simulate RPM for testing purposes
+// This function simulates a pulse on the PC817 sensor to generate a constant RPM value
 float simulateRPM() {
   digitalWrite(SIMULATE_RPM_PIN, HIGH);  // Simulate a pulse on the PC817 sensor
   delay(10);                             // Wait for 10ms = 50 Hz
@@ -941,7 +841,7 @@ void setupPC817Sensor(u_int8_t engine_id, String engine, u_int8_t PC817_pin) {
   // Step 2 : instanciates DigitalInputCounter to read PC817 sensor values
   #ifndef FAKE_MODE
   const unsigned int read_rpm_delay = 500;
-  sensor_engine[engine_id] = new DigitalInputCounter(PC817_pin, INPUT, RISING, read_rpm_delay);    // INPUT for GPIO 34-35 or INPUT_PULLUP for others pins
+  sensor_engine[engine_id] = new DigitalInputCounter(PC817_pin, INPUT, RISING, read_rpm_delay);   // INPUT for GPIO 32-35 or INPUT_PULLUP for others pins
   #else
   sensor_engine[engine_id] = new FloatConstantSensor(50.0, 1, "/config/engine/EL817/CONSTANT");   // Fake sensor for test purpose
   #endif
@@ -992,8 +892,8 @@ void setupRPMSensors() {
 
 // Set offsets for the motion sensor
 void setMotionSensorOffsets() {
-  VectorFloat accel_offset = sensor_motion_offsets->getAccelOffset();
-  VectorFloat gyro_offset = sensor_motion_offsets->getGyroOffset();
+  VectorInt16 accel_offset = sensor_motion_offsets->getAccelOffset();
+  VectorInt16 gyro_offset = sensor_motion_offsets->getGyroOffset();
 
   // Set offsets
   sensor_mpu.setXAccelOffset(accel_offset.x);
@@ -1004,9 +904,9 @@ void setMotionSensorOffsets() {
   sensor_mpu.setZGyroOffset(gyro_offset.z);
 
   #ifdef DEBUG_MODE
-    Serial.printf("MOTION SENSOR OFFSET LOADED : Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ",
+    Serial.printf("MOTION SENSOR OFFSET LOADED : Acceleration X = %i\tY = %i\tZ = %i | ",
                   accel_offset.x, accel_offset.y, accel_offset.z);
-    Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
+    Serial.printf("Gyroscope X = %i\tY = %i\tZ = %i\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
   #endif
 }
 
@@ -1030,15 +930,15 @@ void calibrateMotionSensor() {
   #ifdef DEBUG_MODE
   Serial.println("Active offsets : ");
   //	A_OFFSET_H_READ_A_OFFS(Data);
-  Serial.printf("Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ", 
-        (float) motion_sensor_offsets[0],
-        (float) motion_sensor_offsets[1],
-        (float) motion_sensor_offsets[2]);
+  Serial.printf("Acceleration X = %i\tY = %i\tZ = %i | ", 
+        motion_sensor_offsets[0],
+        motion_sensor_offsets[1],
+        motion_sensor_offsets[2]);
   //	XG_OFFSET_H_READ_OFFS_USR(Data);
-  Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", 
-        (float) motion_sensor_offsets[3],
-        (float) motion_sensor_offsets[4],
-        (float) motion_sensor_offsets[5]);
+  Serial.printf("Gyroscope X = %i\tY = %i\tZ = %i\n", 
+        motion_sensor_offsets[3],
+        motion_sensor_offsets[4],
+        motion_sensor_offsets[5]);
   #endif
 
   // Convert the offsets to a string
@@ -1073,7 +973,6 @@ void setupMotionSensor() {
   // Initialize device
   Serial.println(F("Initializing I2C devices..."));
   sensor_mpu.initialize();
-  //pinMode(INTERRUPT_PIN, INPUT);
 
   // Verify connection
   Serial.println(F("Testing MPU6050 connection..."));
@@ -1107,14 +1006,15 @@ void setupMotionSensor() {
     Serial.println(F("DMP ready !"));
     uint16_t packetSize = sensor_mpu.dmpGetFIFOPacketSize(); // Get expected DMP packet size for later comparison
 
-    //sensor_motion = new RepeatSensor<String>(read_delay, getMotionSensorValues);
-    //sensor_motion->connect_to((new SKOutputRawJson(sk_path_motion[MPU6050_ATTITUDE])));
+    // Read motion sensor values every read_delay milliseconds
+    sensor_motion = new RepeatSensor<String>(read_delay, getMotionSensorValues);
+    sensor_motion->connect_to((new SKOutputRawJson(sk_path_motion[MPU6050_ATTITUDE])));
 
     // TEST
-    RepeatSensor<Quaternion> *sensor_motion_quaternion = new RepeatSensor<Quaternion>(read_delay, getMotionSensorQuaternion);
-    LambdaTransform<Quaternion, String> *sensor_motion_ypr = new LambdaTransform<Quaternion, String>(getMotionSensorYPR);
-    sensor_motion_quaternion->connect_to(sensor_motion_ypr);
-    sensor_motion_ypr->connect_to(new SKOutputRawJson(sk_path_motion[MPU6050_ATTITUDE]));
+    //RepeatSensor<Quaternion> *sensor_motion_quaternion = new RepeatSensor<Quaternion>(read_delay, getMotionSensorQuaternion);
+    //LambdaTransform<Quaternion, String> *sensor_motion_ypr = new LambdaTransform<Quaternion, String>(getMotionSensorYPR);
+    //sensor_motion_quaternion->connect_to(sensor_motion_ypr);
+    //sensor_motion_ypr->connect_to(new SKOutputRawJson(sk_path_motion[MPU6050_ATTITUDE]));
 
     #ifndef FAKE_MODE
     sensor_compass = new RepeatSensor<float>(read_delay, getCompassSensorValue);

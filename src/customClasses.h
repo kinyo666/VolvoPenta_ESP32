@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.11
-  @date 28/06/2025
+  @version 1.0.12
+  @date 29/06/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -143,26 +143,13 @@ class OilPressure : public CurveInterpolator {
   }
 };
 
-/*
-// Override the Linear class to return values only when positive (e.g RPM = 0.0 => Fuel rate = 0.0)
-class LinearPositive : public LambdaTransform<float, float, float, float> {
- public:
-  LinearPositive(float multiplier, float offset, const String& config_path = "")
-    : LambdaTransform<float, float, float, float>(function_, multiplier, offset,
-                                                  param_info_, config_path) {}
- private:
-  static float (*function_)(float, float, float);
-  static const ParamInfo param_info_[];
-};
-*/
-
 // Define the engines transform to output data to Signal-K
 class EngineDataTransform {
   public :
     Frequency *freq;
     Linear *hz_to_rpm;
     FuelConsumption *rpm_to_lhr;
-    LinearPos *lhr_to_m3s; //LinearPositive *lhr_to_m3s;
+    LinearPos *lhr_to_m3s;
     MovingAverage *moving_avg;
     EngineState *running_state;
 
@@ -170,7 +157,6 @@ class EngineDataTransform {
         freq = new Frequency(multiplier, conf_path_engine);                 // Pulses to Hertz (Hz)
         hz_to_rpm = new Linear(60, 0.0);                                    // Hertz (Hz) to Revolutions Per Minute (RPM)
         rpm_to_lhr = new FuelConsumption();                                 // RPM to Liter per Hour (l/hr)
-        //lhr_to_m3s = new LinearPositive(1 / (3.6 * pow(10, 6)), 0.0);   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
         lhr_to_m3s = new LinearPos(linearPositive, 1 / (3.6 * pow(10, 6)), 
                                   0.0, linearPositive_ParamInfo);           // Liter per Hour (l/hr) to Meter cube per second (m3/s)
         moving_avg = new MovingAverage(4, 1.0);                             // Moving average with 4 samples
@@ -208,7 +194,7 @@ class MotionSensorOffsets : public Transform<String, String> {
 
   void set(const String input) {
     // Convert the input string "ax|ay|..." to float values
-    float values[6];
+    int16_t values[6];
     char *input_cstr = const_cast<char*>(input.c_str());
     char* token = strtok(input_cstr, "|");
     int idx = 0;
@@ -238,22 +224,23 @@ class MotionSensorOffsets : public Transform<String, String> {
     notify();
     valid_offset = this->save();
     #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
-    Serial.printf("MOTION SENSOR OFFSET SAVED : Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ",
+    Serial.printf("MOTION SENSOR OFFSET SAVED : Acceleration X = %i\tY = %i\tZ = %i | ",
                   values[0], values[1], values[2]);
-    Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", values[3], values[4], values[5]);
+    Serial.printf("Gyroscope X = %i\tY = %i\tZ = %i\n", values[3], values[4], values[5]);
     #endif
   }
 
   void reset() { 
-    accel_offset.x = 0.0;
-    accel_offset.y = 0.0;
-    accel_offset.z = 0.0;
-    gyro_offset.x = 0.0;
-    gyro_offset.y = 0.0;
-    gyro_offset.z = 0.0;
+    accel_offset.x = 0;
+    accel_offset.y = 0;
+    accel_offset.z = 0;
+    gyro_offset.x = 0;
+    gyro_offset.y = 0;
+    gyro_offset.z = 0;
     valid_offset = false;
   }
 
+  // Convert offset values to a JSON file
   bool to_json(JsonObject& doc) {
     doc["ax_offset"] = accel_offset.x;
     doc["ay_offset"] = accel_offset.y;
@@ -264,9 +251,10 @@ class MotionSensorOffsets : public Transform<String, String> {
     return true;
   }
 
+  // Load offset values from a JSON file
   bool from_json(const JsonObject& config) {
-    if (!config["ax_offset"].is<float>() || !config["ay_offset"].is<float>() || !config["az_offset"].is<float>() ||
-        !config["gx_offset"].is<float>() || !config["gy_offset"].is<float>() || !config["gz_offset"].is<float>())
+    if (!config["ax_offset"].is<int16_t>() || !config["ay_offset"].is<int16_t>() || !config["az_offset"].is<int16_t>() ||
+        !config["gx_offset"].is<int16_t>() || !config["gy_offset"].is<int16_t>() || !config["gz_offset"].is<int16_t>()) 
       return false;
 
     accel_offset.x = config["ax_offset"];
@@ -277,31 +265,34 @@ class MotionSensorOffsets : public Transform<String, String> {
     gyro_offset.z = config["gz_offset"];
 
     #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
-    Serial.printf("MOTION SENSOR OFFSET FROM JSON : Acceleration X = %.2f\tY = %.2f\tZ = %.2f | ",
+    Serial.printf("MOTION SENSOR OFFSET FROM JSON : Acceleration X = %i\tY = %i\tZ = %i | ",
                   accel_offset.x, accel_offset.y, accel_offset.z);
-    Serial.printf("Gyroscope X = %.2f\tY = %.2f\tZ = %.2f\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
+    Serial.printf("Gyroscope X = %i\tY = %i\tZ = %i\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
     #endif
     return true;
   }
 
+  // Return if the offsets are valid (loaded successfully and int16_t format)
   bool is_valid() const {
     return valid_offset;
   }
 
-  VectorFloat getAccelOffset() const {
+  // Get the acceleration offsets as a VectorFloat object
+  VectorInt16 getAccelOffset() const {
     return accel_offset;
   }
 
-  VectorFloat getGyroOffset() const {
+  // Get the gyroscope offsets as a VectorFloat object
+  VectorInt16 getGyroOffset() const {
     return gyro_offset;
   }
 
   private:
   JsonDocument jdoc_conf_motionsensor;
   JsonObject conf_motionsensor;                                 // MPU X/Y/Z offsets values if exists
-  VectorFloat accel_offset;                                     // Acceleration X/Y/Z offset values
-  VectorFloat gyro_offset;                                      // Gyroscope X/Y/Z offset values
-  bool valid_offset = false;                                    // Flag to indicate if the offsets are valid
+  VectorInt16 accel_offset;                                     // Acceleration X/Y/Z offset values
+  VectorInt16 gyro_offset;                                      // Gyroscope X/Y/Z offset values
+  bool valid_offset;                                            // Flag to indicate if the offsets are valid
 };
 
 const String ConfigSchema(const MotionSensorOffsets& obj) {
@@ -499,20 +490,3 @@ const String ConfigSchema(const ConfigSensESP& obj) {
 inline bool ConfigRequiresRestart(const ConfigSensESP& obj) {
   return true;
 }
-
-// Patched in custom debounce.h with appropriate template and removed from debounce.cpp.
-// from_json() and to_json moved into public section as well
-/*
-const String ConfigSchema(const Debounce<int>& obj) {
-  return R"###({
-    "type": "object",
-    "properties": {
-      "min_delay": {
-        "title": "Minimum delay",
-        "type": "number",
-        "description": "The minimum time in ms between inputs for output to happen"
-      }
-    }
-  })###";
-}
-*/
