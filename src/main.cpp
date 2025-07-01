@@ -1,12 +1,11 @@
 /*
   @TODO :
   P0
-  - Ajouter un contrôle de la valeur avec CHAIN_LIMIT_LOW et CHAIN_LIMIT HIGH ?
-  - Intégrer la lib MPU9250
-
+  - Ajouter une ConstantSensor pour la chaine de mouillage (init) + changer le signe après sauvegarde
   P1
   - Ajouter une moyenne de consommation de carburant réelle
-
+  - Intégrer la lib MPU9250
+  - Ajouter un contrôle de la valeur avec CHAIN_LIMIT_LOW et CHAIN_LIMIT HIGH ?
   P2
   - Surcharger la classe SKMetaData pour envoyer les données de zones
 
@@ -24,8 +23,8 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.12
-  @date 29/06/2025
+  @version 1.0.13
+  @date 01/07/2025
   @ref SensESP v3.1.0
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -36,6 +35,7 @@
 #include <INA3221.h>
 #include <sensesp.h>
 #include <sensesp_app_builder.h>
+#include <sensesp/transforms/repeat.h>
 #include <sensesp/sensors/constant_sensor.h>
 #include <sensesp/sensors/digital_input.h>
 #include <sensesp/signalk/signalk_output.h>
@@ -87,8 +87,8 @@
 // Use Debug Mode for verbose logs and Fake Mode to simulate some data
 #define DEBUG_MODE 1
 //#define FAKE_MODE 1
-#define SIMULATE_RPM 1
-#define SIMULATE_RPM_PIN 13
+//#define SIMULATE_RPM 1
+//#define SIMULATE_RPM_PIN 13
 
 // SensESP UI Config order
 #define UI_ORDER_TEMP 10
@@ -131,8 +131,8 @@ const String conf_path_volt[INA3221_NB][INA3221_CH_NUM] = {
         {"/CONFIG/BABORD/INA3221/0/LINEAR_CH1",   "/CONFIG/BABORD/INA3221/0/LINEAR_CH2",  "/CONFIG/BABORD/INA3221/0/LINEAR_CH3"},
         {"/CONFIG/CUVES/INA3221/1/LINEAR_CH1",    "/CONFIG/CUVES/INA3221/1/LINEAR_CH2",   "/CONFIG/CUVES/INA3221/1/LINEAR_CH3"},
         {"/CONFIG/TRIBORD/INA3221/2/LINEAR_CH1",  "/CONFIG/TRIBORD/INA3221/2/LINEAR_CH2", "/CONFIG/TRIBORD/INA3221/2/LINEAR_CH3"}};
-const String conf_path_engines[ENGINE_NB] = {"/CONFIG/BABORD/PC817/FREQUENCY_RPM", 
-                                            "/CONFIG/TRIBORD/PC817/FREQUENCY_RPM"};
+const String conf_path_engines[ENGINE_NB][2] = {{"/CONFIG/BABORD/PC817/FREQUENCY_RPM", "/CONFIG/BABORD/PC817/MOVING_AVG"},
+                                                {"/CONFIG/TRIBORD/PC817/FREQUENCY_RPM", "/CONFIG/TRIBORD/PC817/MOVING_AVG"}}; 
 const String conf_path_chain[CHAIN_COUNTER_NB] = { "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
 const String conf_path_motion = "/CONFIG/MOTION/OFFSETS";
 const String conf_path_rudder = "/CONFIG/RUDDER";
@@ -162,6 +162,7 @@ JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
 boolean chain_counter_saved = true;                           // Trigger to save chain counter new value
+StringConstantSensor *sensor_windlass_direction;              // Windlass chain counter value for initialization (StringConstantSensor)
 
 // Motion and compass sensor
 MPU6050 sensor_mpu;                                           // 1 MPU-6050 Motion sensor
@@ -276,8 +277,10 @@ float getVoltageINA3221_OTHERS3_CH1() {
   }
   else if ((chain_counter_saved == false) && (chain_counter_timer == CHAIN_COUNTER_SAVE_TIMER)) {
       chain_counter_saved = chain_counter->save();                                          // Save last value to local file system
-      if (chain_counter_saved)
+      if (chain_counter_saved) {
         chain_counter_timer = 0;                                                            // Reset timer to 0
+        sensor_windlass_direction->set(String(conf_windlass["value"].as<float>()) + "m ▬"); // Set the last value to constant sensor
+      }
 
       #ifdef DEBUG_MODE
       Serial.printf("WINDLASS : UP NOK -> saved = %s\n", chain_counter_saved ? "true" : "false");
@@ -536,7 +539,7 @@ void setupTemperatureSensors() {
 void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine) {
   LinearPos *sensor_volt_linearpos_volt2k = new LinearPos(linearPositive, 1.0, 0.0, linearPositive_ParamInfo,
                                                       conf_path_volt[INA3221_Id][INA3221_CH1] + "/LINEAR_POSITIVE");
-  LinearPos *sensor_volt_linearpos_volt2pa = new LinearPos(linearPositive, pow(10, 5) * 1.46, -0.776, linearPositive_ParamInfo,
+  LinearPos *sensor_volt_linearpos_volt2pa = new LinearPos(linearPositive, pow(10, 5) * 1.4793, -0.776, linearPositive_ParamInfo,
                                                        conf_path_volt[INA3221_Id][INA3221_CH2] + "/LINEAR_POSITIVE");
 
   // Coolant temperature
@@ -635,11 +638,18 @@ void setupVoltageChainSensors() {
   sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
     ->connect_to(new SKOutputFloat(sk_path_windlass, 
-                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the float value to SignalK
+                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the new float value to SignalK
 
+  LambdaTransform<float, String> *sensor_windlass_string = new LambdaTransform<float, String>(chainCounterToString);
   sensor_windlass_counter
-    ->connect_to(new LambdaTransform<float, String>(chainCounterToString))
-    ->connect_to(new SKOutputString(sk_path_windlass + ".direction"));                               // Output the value + direction to SignalK
+    ->connect_to(sensor_windlass_string)
+    ->connect_to(new SKOutputString(sk_path_windlass + ".direction"));                               // Output the new value + direction to SignalK
+
+  // Initialize the chain counter value to Signal K path (last saved value or default 0.0)
+  bool chain_counter_value = conf_windlass["value"].is<float>();
+  String chain_counter_string = (chain_counter_value ? (String(conf_windlass["value"].as<float>()) + "m ▬") : "0.0m ▬");
+  sensor_windlass_direction = new StringConstantSensor(chain_counter_string, 6000);
+  sensor_windlass_direction->connect_to(new SKOutputString(sk_path_windlass + ".direction"));        // Output the last value + direction to SignalK
 
   /* Set SensESP Configuration UI for chain_counter and chain_debounce
      If you want something to appear in the web UI, you first define overloaded ConfigSchema and ConfigRequiresRestart functions for that class.
@@ -654,6 +664,11 @@ void setupVoltageChainSensors() {
     ->set_title("Compteur Chaine Debounce")
     ->set_description("Compteur Chaine - DebounceInt")
     ->set_sort_order(UI_ORDER_CHAIN+1);
+
+  ConfigItem(sensor_windlass_direction)
+    ->set_title("Compteur Chaine StringConstantSensor")
+    ->set_description("Compteur Chaine - StringConstantSensor")
+    ->set_sort_order(UI_ORDER_CHAIN+2);
 
   #ifdef DEBUG_MODE
   sensor_windlass_debounce->connect_to(new SKOutputInt(sk_path_windlass + ".debounce.raw"));
@@ -823,6 +838,7 @@ SKMetadata getEnginesSKMetadata() {
 
 // Simulate RPM for testing purposes
 // This function simulates a pulse on the PC817 sensor to generate a constant RPM value
+#ifdef SIMULATE_RPM
 float simulateRPM() {
   digitalWrite(SIMULATE_RPM_PIN, HIGH);  // Simulate a pulse on the PC817 sensor
   delay(10);                             // Wait for 10ms = 50 Hz
@@ -830,6 +846,7 @@ float simulateRPM() {
   delay(10);
   return 50.0; // Return a constant value for testing purposes
 }
+#endif
 
 // Setup the PC817 sensor for engine RPM
 void setupPC817Sensor(u_int8_t engine_id, String engine, u_int8_t PC817_pin) {

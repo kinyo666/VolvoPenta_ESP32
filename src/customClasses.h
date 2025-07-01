@@ -6,8 +6,8 @@
   - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
 
   @author kinyo666
-  @version 1.0.12
-  @date 29/06/2025
+  @version 1.0.13
+  @date 01/07/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -25,6 +25,10 @@
 #define ENGINE_STATE_RUNNING      0x011
 #define ENGINE_STATE_IS_RUNNING   0x010
 #define ENGINE_SLEEP_ENABLE 1
+
+// Config path index for PC817 sensors
+#define PC817_FREQUENCY_RPM 0
+#define PC817_MOVING_AVG 1
 
 #define DEBUG_MODE_CUSTOM_CLASSES_H 1
 
@@ -47,7 +51,7 @@ const char* sensor_keys[] = {
 // Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
 auto linearPositive = [](float input, float multiplier, float offset) -> float {
   if (input > 0)
-    return multiplier * input + offset;
+    return ((multiplier * input) + offset);
   else
     return (0.0f);
 };
@@ -153,18 +157,18 @@ class EngineDataTransform {
     MovingAverage *moving_avg;
     EngineState *running_state;
 
-    EngineDataTransform(float multiplier, String conf_path_engine, u_int engine_id) { 
-        freq = new Frequency(multiplier, conf_path_engine);                 // Pulses to Hertz (Hz)
-        hz_to_rpm = new Linear(60, 0.0);                                    // Hertz (Hz) to Revolutions Per Minute (RPM)
-        rpm_to_lhr = new FuelConsumption();                                 // RPM to Liter per Hour (l/hr)
+    EngineDataTransform(float multiplier, const String *conf_path_engine, u_int engine_id) { 
+        freq = new Frequency(multiplier, conf_path_engine[PC817_FREQUENCY_RPM]);    // Pulses to Hertz (Hz)
+        hz_to_rpm = new Linear(60, 0.0);                                            // Hertz (Hz) to Revolutions Per Minute (RPM)
+        rpm_to_lhr = new FuelConsumption();                                         // RPM to Liter per Hour (l/hr)
         lhr_to_m3s = new LinearPos(linearPositive, 1 / (3.6 * pow(10, 6)), 
-                                  0.0, linearPositive_ParamInfo);           // Liter per Hour (l/hr) to Meter cube per second (m3/s)
-        moving_avg = new MovingAverage(4, 1.0);                             // Moving average with 4 samples
+                                  0.0, linearPositive_ParamInfo);                   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
+        moving_avg = new MovingAverage(4, 1.0, conf_path_engine[PC817_MOVING_AVG]); // Moving average with 4 samples
         running_state = new EngineState(runningState, engine_id, 
-                                        runningState_ParamInfo);            // Hertz (Hz) to running state (true or false)
+                                        runningState_ParamInfo);                    // Hertz (Hz) to running state (true or false)
 
         ConfigItem(freq)
-        ->set_title("Compte-tours - " + conf_path_engine)
+        ->set_title("Compte-tours - " + conf_path_engine[PC817_FREQUENCY_RPM])
         ->set_description("Multiplier needs to be adjusted based on flywheel to Alternator W ratio."\
                           "Example: 1 turn on an AQAD41 makes 2.45 turns on the Alternator, and the Alternator has 6 poles which makes a total of 2.45 x 6 = 14.7 Hz per turn. SignalK needs info in Hz so we need to divide the incoming value with 14.7, or as in our case multiply with (1/14.7) = 0,06803"\
                           "If Ratio is unknown, the original Tachometer might have a max Impulses/min written on it, divide that with max rpm on the meter and you\'ll get the ratio. Tachometer 860420 is marked with 73500Imp/min and has a scale to 5000rpm. 73500 divided with 5000 equals 14,7, Tada!"\
@@ -172,14 +176,11 @@ class EngineDataTransform {
                           "AQAD41 example: 60 divided with FlyWheel To W Ratio (60 / 14,7 = 4,08)")
         ->set_sort_order(25+(2*engine_id));
 
-        // TODO : add a ConfigItem for moving_avg
-        /*
         ConfigItem(moving_avg)
-        ->set_title("Compte-tours - MovingAvg " + conf_path_engine)
+        ->set_title("Compte-tours - MovingAvg " + conf_path_engine[PC817_MOVING_AVG])
         ->set_description("Moving average of the engine RPM to smooth out the signal."\
                           "Default value is 4 samples.")
         ->set_sort_order(26+(2*engine_id));
-        */
       }
 };
 
