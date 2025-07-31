@@ -3,11 +3,11 @@
   - CurveInterpolator for Fuel Consumption, Coolant Temperature, Oil Pressure
   - Transform for Positive Linear transform and Engine Data
   - Integrator for Persistent Integrator
-  - ConfigSchema for Persistent Integrator and DebounceInt (missing in SensESP v3.0.0)
+  - ConfigSchema for Persistent Integrator and ConfigSensESP
 
   @author kinyo666
-  @version 1.0.13
-  @date 01/07/2025
+  @version 1.0.14
+  @date 31/07/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include <sensesp/transforms/linear.h>
@@ -314,25 +314,33 @@ inline bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {
   return true;
 }
 
-// Override Integrator class with persistent last value and k multiplier configuration
+// Override Integrator class with persistent last value, gipsy_circum and A0 pin threshold configuration
 class PersistentIntegrator : public Transform<int, float> {
   public:
-  PersistentIntegrator(float gipsy_circum = 1.0, float value = 0.0, const String& config_path = "")
-     : Transform<int, float>(config_path), k{k}, value{value} {
+  PersistentIntegrator(float gipsy_circum = 1.0, float rode_deployed = 0.0, float a0_threshold = 26400, const String& config_path = "")
+     : Transform<int, float>(config_path), k{gipsy_circum}, value{rode_deployed}, threshold{a0_threshold} {
       this->load();
       this->emit(value);
   }
 
+  void set_direction(float direction) {
+      k = direction;
+  }
+
   void set(const int& input) {
-    value += input * k;
+    if (input == 0)
+      value += k;   // Increment the counter if the debounced input is zero
+    if (value < 0)
+      value = 0.0;  // Prevent negative values
     this->emit(value);
   }
 
-  void reset() { value = 0.0; k = 1.0; }
+  void reset() { value = 0.0; k = 1.0; threshold = 26400.0; }  // Reset to default values
 
   bool to_json(JsonObject& doc) {
     doc["k"] = k;
     doc["value"] = value;
+    doc["threshold"] = threshold;
     return true;
   }
 
@@ -341,14 +349,16 @@ class PersistentIntegrator : public Transform<int, float> {
         return false;
       }
     k = config["k"];
-    value = (config["value"].is<float>() ? config["value"] : 0.0);    // May not have a value at the first load
+    value = (config["value"].is<float>() ? config["value"] : 0.0);                  // May not have a value at the first load
+    threshold = (config["threshold"].is<float>() ? config["threshold"] : 26400.0);  // Default threshold value for A0 pin
 
     return true;
   }
 
  private:
-  float k;
-  float value = 0.0;
+  float k;                  // Multiplier for the integrator (gipsy circumference)
+  float value = 0.0;        // Last value of the integrator (rode deployed)
+  float threshold;          // Threshold value to determine if windlass UP direction is active (A0 pin, default 26400)
 };
 
 const String ConfigSchema(const PersistentIntegrator& obj) {
@@ -356,7 +366,8 @@ return R"({
   "type": "object",
   "properties": {
       "k": { "title": "Multiplier", "type": "number" },
-      "value": { "title": "Value", "type": "number" }
+      "value": { "title": "Value", "type": "number" },
+      "threshold": { "title": "Threshold", "type": "number" }
   }
 })";
 }
@@ -444,12 +455,12 @@ class ConfigSensESP : public SensorConfig {
         "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
         "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
         "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
-        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Windlass + Rudder Angle" },
+        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
         "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
         "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
         "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
         "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
-        "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "Chain Counter Feature" },
+        "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },        
         "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
         "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
         "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
@@ -474,12 +485,12 @@ const String ConfigSchema(const ConfigSensESP& obj) {
       "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
       "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
       "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
-      "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Others" },
+      "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
       "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
       "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
       "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
       "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
-      "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "Chain Counter Feature" },
+      "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },
       "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
       "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
       "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
