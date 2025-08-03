@@ -3,20 +3,34 @@
   - CurveInterpolator for Fuel Consumption, Coolant Temperature, Oil Pressure
   - Transform for Positive Linear transform and Engine Data
   - Integrator for Persistent Integrator
-  - ConfigSchema for Persistent Integrator and ConfigSensESP
+  - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.14
-  @date 31/07/2025
+  @version 1.0.15
+  @date 03/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
+#ifndef CUSTOM_CLASSES_H
+#define CUSTOM_CLASSES_H
+
+#include <sensesp.h>
+#include <sensesp/sensors/sensor.h>
+#include <sensesp/transforms/transform.h>
+#include <sensesp/transforms/lambda_transform.h>
 #include <sensesp/transforms/linear.h>
 #include <sensesp/transforms/curveinterpolator.h>
 #include <sensesp/transforms/frequency.h>
-#include <sensesp/transforms/voltagedivider.h>
 #include <sensesp/transforms/moving_average.h>
 #include <sensesp/transforms/integrator.h>
 #include <sensesp/ui/config_item.h>
+#include <helper_3dmath.h>
+
+// SensESP UI Config order
+#define UI_ORDER_TEMP 10
+#define UI_ORDER_ENGINE 20
+#define UI_ORDER_TANK 30
+#define UI_ORDER_CHAIN 40
+#define UI_ORDER_MOTION 50
 
 // Binary mask for engine state and sleep mode enable(1) / disable(0)
 #define ENGINE_STATE_OFF          0x000
@@ -31,40 +45,22 @@
 #define PC817_MOVING_AVG 1
 
 #define DEBUG_MODE_CUSTOM_CLASSES_H 1
+#define DEBUG_MODE 1
 
 extern void sleepModeINA3221(u_int8_t, u_int8_t);
 extern const String conf_path_global;
+//auto linearPositive();
 
-using namespace sensesp;
+namespace sensesp {
+//extern const char* sensor_keys[];
+extern const ParamInfo *linearPositive_ParamInfo;
+extern const ParamInfo *runningState_ParamInfo;
 
 typedef LambdaTransform<float, float, float, float> LinearPos;
 typedef LambdaTransform<float, boolean, u_int8_t> EngineState;
 
-// Keys for enable / disable sensors in the configuration UI
-const char* sensor_keys[] = {
-      "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
-      "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
-      "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
-      "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE", "RUDDER_ANGLE_FEATURE"
- };
-
-// Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
-auto linearPositive = [](float input, float multiplier, float offset) -> float {
-  if (input > 0)
-    return ((multiplier * input) + offset);
-  else
-    return (0.0f);
-};
-const ParamInfo* linearPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
-
-// Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
-auto runningState = [](float input, u_int8_t engine_id) -> boolean {
-  #if ENGINE_SLEEP_ENABLE == 1
-  sleepModeINA3221(engine_id, ((input > 1) ? ENGINE_STATE_RUNNING : ENGINE_STATE_NOT_RUNNING));
-  #endif
-  return (input > 0);
-};
-const ParamInfo* runningState_ParamInfo = new ParamInfo[1]{{"engine_state", "Engine State"}};
+float linearPositive(float, float, float);
+boolean runningState (float, u_int8_t);
 
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
 class FuelConsumption : public CurveInterpolator {
@@ -193,7 +189,7 @@ class MotionSensorOffsets : public Transform<String, String> {
       valid_offset = this->load();
   }
 
-  void set(const String input) {
+  inline void set(const String input) {
     // Convert the input string "ax|ay|..." to float values
     int16_t values[6];
     char *input_cstr = const_cast<char*>(input.c_str());
@@ -231,7 +227,7 @@ class MotionSensorOffsets : public Transform<String, String> {
     #endif
   }
 
-  void reset() { 
+  inline void reset() { 
     accel_offset.x = 0;
     accel_offset.y = 0;
     accel_offset.z = 0;
@@ -242,7 +238,7 @@ class MotionSensorOffsets : public Transform<String, String> {
   }
 
   // Convert offset values to a JSON file
-  bool to_json(JsonObject& doc) {
+  inline bool to_json(JsonObject& doc) {
     doc["ax_offset"] = accel_offset.x;
     doc["ay_offset"] = accel_offset.y;
     doc["az_offset"] = accel_offset.z;
@@ -253,7 +249,7 @@ class MotionSensorOffsets : public Transform<String, String> {
   }
 
   // Load offset values from a JSON file
-  bool from_json(const JsonObject& config) {
+  inline bool from_json(const JsonObject& config) {
     if (!config["ax_offset"].is<int16_t>() || !config["ay_offset"].is<int16_t>() || !config["az_offset"].is<int16_t>() ||
         !config["gx_offset"].is<int16_t>() || !config["gy_offset"].is<int16_t>() || !config["gz_offset"].is<int16_t>()) 
       return false;
@@ -274,17 +270,17 @@ class MotionSensorOffsets : public Transform<String, String> {
   }
 
   // Return if the offsets are valid (loaded successfully and int16_t format)
-  bool is_valid() const {
+  inline bool is_valid() const {
     return valid_offset;
   }
 
   // Get the acceleration offsets as a VectorFloat object
-  VectorInt16 getAccelOffset() const {
+  inline VectorInt16 getAccelOffset() const {
     return accel_offset;
   }
 
   // Get the gyroscope offsets as a VectorFloat object
-  VectorInt16 getGyroOffset() const {
+  inline VectorInt16 getGyroOffset() const {
     return gyro_offset;
   }
 
@@ -295,86 +291,6 @@ class MotionSensorOffsets : public Transform<String, String> {
   VectorInt16 gyro_offset;                                      // Gyroscope X/Y/Z offset values
   bool valid_offset;                                            // Flag to indicate if the offsets are valid
 };
-
-const String ConfigSchema(const MotionSensorOffsets& obj) {
-  return R"({
-    "type": "object",
-    "properties": {
-        "ax_offset": { "title": "Accel X Offset", "type": "number" },
-        "ay_offset": { "title": "Accel Y Offset", "type": "number" },
-        "az_offset": { "title": "Accel Z Offset", "type": "number" },
-        "gx_offset": { "title": "Gyro X Offset", "type": "number" },
-        "gy_offset": { "title": "Gyro Y Offset", "type": "number" },
-        "gz_offset": { "title": "Gyro Z Offset", "type": "number" }
-    }
-  })";
-  }
-  
-inline bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {
-  return true;
-}
-
-// Override Integrator class with persistent last value, gipsy_circum and A0 pin threshold configuration
-class PersistentIntegrator : public Transform<int, float> {
-  public:
-  PersistentIntegrator(float gipsy_circum = 1.0, float rode_deployed = 0.0, float a0_threshold = 26400, const String& config_path = "")
-     : Transform<int, float>(config_path), k{gipsy_circum}, value{rode_deployed}, threshold{a0_threshold} {
-      this->load();
-      this->emit(value);
-  }
-
-  void set_direction(float direction) {
-      k = direction;
-  }
-
-  void set(const int& input) {
-    if (input == 0)
-      value += k;   // Increment the counter if the debounced input is zero
-    if (value < 0)
-      value = 0.0;  // Prevent negative values
-    this->emit(value);
-  }
-
-  void reset() { value = 0.0; k = 1.0; threshold = 26400.0; }  // Reset to default values
-
-  bool to_json(JsonObject& doc) {
-    doc["k"] = k;
-    doc["value"] = value;
-    doc["threshold"] = threshold;
-    return true;
-  }
-
-  bool from_json(const JsonObject& config) {
-    if (!config["k"].is<float>()) {
-        return false;
-      }
-    k = config["k"];
-    value = (config["value"].is<float>() ? config["value"] : 0.0);                  // May not have a value at the first load
-    threshold = (config["threshold"].is<float>() ? config["threshold"] : 26400.0);  // Default threshold value for A0 pin
-
-    return true;
-  }
-
- private:
-  float k;                  // Multiplier for the integrator (gipsy circumference)
-  float value = 0.0;        // Last value of the integrator (rode deployed)
-  float threshold;          // Threshold value to determine if windlass UP direction is active (A0 pin, default 26400)
-};
-
-const String ConfigSchema(const PersistentIntegrator& obj) {
-return R"({
-  "type": "object",
-  "properties": {
-      "k": { "title": "Multiplier", "type": "number" },
-      "value": { "title": "Value", "type": "number" },
-      "threshold": { "title": "Threshold", "type": "number" }
-  }
-})";
-}
-
-inline bool ConfigRequiresRestart(const PersistentIntegrator& obj) {
-  return true;
-}
 
 // Load and save SensESP configuration to enable/disable sensors
 class ConfigSensESP : public SensorConfig {
@@ -403,7 +319,7 @@ class ConfigSensESP : public SensorConfig {
   }
 
   // Set configuration to a JSON file
-  bool to_json(JsonObject& root) override { 
+  inline bool to_json(JsonObject& root) override { 
     for (const char* key : sensor_keys)
       if (config_json[key].is<bool>())
         root[key] = config_json[key];
@@ -414,7 +330,7 @@ class ConfigSensESP : public SensorConfig {
   }
 
   // Get configuration from the JSON file
-  bool from_json(const JsonObject& root) override {
+  inline bool from_json(const JsonObject& root) override {
     for (const char* key : sensor_keys)
       if (root[key].is<bool>())
         config_json[key] = root[key];
@@ -425,7 +341,7 @@ class ConfigSensESP : public SensorConfig {
   }
 
   // Return true if the sensor (key) is enabled
-  bool is_enabled(String key) {
+  inline bool is_enabled(String key) {
     if (config_json[key].is<bool>())
       return config_json[key];
     else
@@ -433,17 +349,17 @@ class ConfigSensESP : public SensorConfig {
   }
 
   // Set the status of a sensor (key) to enabled or disabled
-  void set_status(String key, bool status) {
+  inline void set_status(String key, bool status) {
     config_json[key] = status;
   }
 
   // Return the configuration path
-  const String& get_config_path() {
+  inline const String& get_config_path() {
     return conf_path_global;
   }
 
   // Return the configuration schema
-  const String get_config_schema() {
+  inline const String get_config_schema() {
     return R"({
       "type": "object",
       "properties": {
@@ -470,35 +386,19 @@ class ConfigSensESP : public SensorConfig {
 
   private:
   JsonDocument config_json;
+  // Keys for enable / disable sensors in the configuration UI
+  const char* sensor_keys[17] = {
+        "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
+        "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
+        "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
+        "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE", "RUDDER_ANGLE_FEATURE"
+  };
 };
 
-// Set default configuration schema for ConfigSensESP
-const String ConfigSchema(const ConfigSensESP& obj) {
-  return R"({
-    "type": "object",
-    "properties": {
-      "DS18B20_FEATURE": { "type": "boolean", "title": "DS18B20 Feature" },
-      "DS18B20_BABORD_0": { "type": "boolean", "title": "- DS18B20 Babord" },
-      "DS18B20_TRIBORD_1": { "type": "boolean", "title": "- DS18B20 Tribord" },
-      "DS18B20_COMMON_2": { "type": "boolean", "title": "- DS18B20 Common" },
-      "INA3221_FEATURE": { "type": "boolean", "title": "INA3221 Feature" },
-      "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
-      "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
-      "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
-      "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
-      "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
-      "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
-      "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
-      "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
-      "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },
-      "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
-      "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
-      "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
-    }
-  })";
-}
+bool ConfigRequiresRestart(const ConfigSensESP& obj);
+const String ConfigSchema(const ConfigSensESP& obj);
 
-// Set requires restart to true for ConfigSensESP
-inline bool ConfigRequiresRestart(const ConfigSensESP& obj) {
-  return true;
+bool ConfigRequiresRestart(const MotionSensorOffsets& obj);
+const String ConfigSchema(const MotionSensorOffsets& obj);
 }
+#endif // CUSTOM_CLASSES_H
