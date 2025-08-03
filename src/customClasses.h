@@ -6,7 +6,7 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.15
+  @version 1.0.16
   @date 03/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -32,14 +32,6 @@
 #define UI_ORDER_CHAIN 40
 #define UI_ORDER_MOTION 50
 
-// Binary mask for engine state and sleep mode enable(1) / disable(0)
-#define ENGINE_STATE_OFF          0x000
-#define ENGINE_STATE_ON           0x001
-#define ENGINE_STATE_NOT_RUNNING  0x101
-#define ENGINE_STATE_RUNNING      0x011
-#define ENGINE_STATE_IS_RUNNING   0x010
-#define ENGINE_SLEEP_ENABLE 1
-
 // Config path index for PC817 sensors
 #define PC817_FREQUENCY_RPM 0
 #define PC817_MOVING_AVG 1
@@ -47,20 +39,128 @@
 #define DEBUG_MODE_CUSTOM_CLASSES_H 1
 #define DEBUG_MODE 1
 
-extern void sleepModeINA3221(u_int8_t, u_int8_t);
+//extern void sleepModeINA3221(u_int8_t, u_int8_t);
 extern const String conf_path_global;
 //auto linearPositive();
 
 namespace sensesp {
 //extern const char* sensor_keys[];
 extern const ParamInfo *linearPositive_ParamInfo;
-extern const ParamInfo *runningState_ParamInfo;
+//extern const ParamInfo *runningState_ParamInfo;
 
 typedef LambdaTransform<float, float, float, float> LinearPos;
-typedef LambdaTransform<float, boolean, u_int8_t> EngineState;
+typedef LambdaTransform<float, boolean> EngineState;
 
 float linearPositive(float, float, float);
-boolean runningState (float, u_int8_t);
+boolean runningState(float);
+
+// Load and save SensESP configuration to enable/disable sensors
+class ConfigSensESP : public SensorConfig {
+  public:
+  ConfigSensESP(const String& config_path) : SensorConfig(config_path) {
+    // Load current configuration otherwise set default values to true for all sensors
+    if (!load()) {
+      for (const char* key : sensor_keys)
+        config_json[key] = true;
+      save();
+    }
+
+    // Initialize ConfigItem instance with custom ConfigSchema
+    ConfigItem(this)->set_title("Sensors Configuration")
+                    ->set_description("Enable or disable sensors by group or individually. Restart to apply any changes.")
+                    ->set_config_schema(get_config_schema())
+                    ->set_requires_restart(true)
+                    ->set_sort_order(0);
+
+    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+      Serial.println("SENSORS CONFIG :");
+      String jsonify;
+      serializeJsonPretty(config_json, jsonify);
+      Serial.println(jsonify);
+    #endif
+  }
+
+  // Set configuration to a JSON file
+  inline bool to_json(JsonObject& root) override { 
+    for (const char* key : sensor_keys)
+      if (config_json[key].is<bool>())
+        root[key] = config_json[key];
+      else
+        root[key] = false;
+
+    return true;
+  }
+
+  // Get configuration from the JSON file
+  inline bool from_json(const JsonObject& root) override {
+    for (const char* key : sensor_keys)
+      if (root[key].is<bool>())
+        config_json[key] = root[key];
+      else
+        config_json[key] = false;
+
+    return true;
+  }
+
+  // Return true if the sensor (key) is enabled
+  inline bool is_enabled(String key) {
+    if (config_json[key].is<bool>())
+      return config_json[key];
+    else
+      return false;
+  }
+
+  // Set the status of a sensor (key) to enabled or disabled
+  inline void set_status(String key, bool status) {
+    config_json[key] = status;
+  }
+
+  // Return the configuration path
+  inline const String& get_config_path() {
+    return conf_path_global;
+  }
+
+  // Return the configuration schema
+  inline const String get_config_schema() {
+    return R"({
+      "type": "object",
+      "properties": {
+        "DS18B20_FEATURE": { "type": "boolean", "title": "DS18B20 Feature" },
+        "DS18B20_BABORD_0": { "type": "boolean", "title": "- DS18B20 Babord" },
+        "DS18B20_TRIBORD_1": { "type": "boolean", "title": "- DS18B20 Tribord" },
+        "DS18B20_COMMON_2": { "type": "boolean", "title": "- DS18B20 Common" },
+        "INA3221_FEATURE": { "type": "boolean", "title": "INA3221 Feature" },
+        "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
+        "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
+        "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
+        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
+        "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
+        "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
+        "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
+        "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
+        "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },        
+        "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
+        "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
+        "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
+      }
+    })";
+  }
+
+  inline unsigned int get_read_delay() {
+    return this->read_delay;
+  }
+
+  private:
+  unsigned int read_delay = 1000; // Default read delay in milliseconds
+  JsonDocument config_json;
+  // Keys for enable / disable sensors in the configuration UI
+  const char* sensor_keys[17] = {
+        "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
+        "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
+        "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
+        "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE", "RUDDER_ANGLE_FEATURE"
+  };
+};
 
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
 class FuelConsumption : public CurveInterpolator {
@@ -160,8 +260,7 @@ class EngineDataTransform {
         lhr_to_m3s = new LinearPos(linearPositive, 1 / (3.6 * pow(10, 6)), 
                                   0.0, linearPositive_ParamInfo);                   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
         moving_avg = new MovingAverage(4, 1.0, conf_path_engine[PC817_MOVING_AVG]); // Moving average with 4 samples
-        running_state = new EngineState(runningState, engine_id, 
-                                        runningState_ParamInfo);                    // Hertz (Hz) to running state (true or false)
+        running_state = new EngineState(runningState);                              // Hertz (Hz) to running state (true or false)
 
         ConfigItem(freq)
         ->set_title("Compte-tours - " + conf_path_engine[PC817_FREQUENCY_RPM])
@@ -292,108 +391,6 @@ class MotionSensorOffsets : public Transform<String, String> {
   bool valid_offset;                                            // Flag to indicate if the offsets are valid
 };
 
-// Load and save SensESP configuration to enable/disable sensors
-class ConfigSensESP : public SensorConfig {
-  public:
-  ConfigSensESP(const String& config_path) : SensorConfig(config_path) {
-    // Load current configuration otherwise set default values to true for all sensors
-    if (!load()) {
-      for (const char* key : sensor_keys)
-        config_json[key] = true;
-      save();
-    }
-
-    // Initialize ConfigItem instance with custom ConfigSchema
-    ConfigItem(this)->set_title("Sensors Configuration")
-                    ->set_description("Enable or disable sensors by group or individually. Restart to apply any changes.")
-                    ->set_config_schema(get_config_schema())
-                    ->set_requires_restart(true)
-                    ->set_sort_order(0);
-
-    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
-      Serial.println("SENSORS CONFIG :");
-      String jsonify;
-      serializeJsonPretty(config_json, jsonify);
-      Serial.println(jsonify);
-    #endif
-  }
-
-  // Set configuration to a JSON file
-  inline bool to_json(JsonObject& root) override { 
-    for (const char* key : sensor_keys)
-      if (config_json[key].is<bool>())
-        root[key] = config_json[key];
-      else
-        root[key] = false;
-
-    return true;
-  }
-
-  // Get configuration from the JSON file
-  inline bool from_json(const JsonObject& root) override {
-    for (const char* key : sensor_keys)
-      if (root[key].is<bool>())
-        config_json[key] = root[key];
-      else
-        config_json[key] = false;
-
-    return true;
-  }
-
-  // Return true if the sensor (key) is enabled
-  inline bool is_enabled(String key) {
-    if (config_json[key].is<bool>())
-      return config_json[key];
-    else
-      return false;
-  }
-
-  // Set the status of a sensor (key) to enabled or disabled
-  inline void set_status(String key, bool status) {
-    config_json[key] = status;
-  }
-
-  // Return the configuration path
-  inline const String& get_config_path() {
-    return conf_path_global;
-  }
-
-  // Return the configuration schema
-  inline const String get_config_schema() {
-    return R"({
-      "type": "object",
-      "properties": {
-        "DS18B20_FEATURE": { "type": "boolean", "title": "DS18B20 Feature" },
-        "DS18B20_BABORD_0": { "type": "boolean", "title": "- DS18B20 Babord" },
-        "DS18B20_TRIBORD_1": { "type": "boolean", "title": "- DS18B20 Tribord" },
-        "DS18B20_COMMON_2": { "type": "boolean", "title": "- DS18B20 Common" },
-        "INA3221_FEATURE": { "type": "boolean", "title": "INA3221 Feature" },
-        "INA3221_BABORD_0": { "type": "boolean", "title": "- INA3221 Babord" },
-        "INA3221_CUVES_1": { "type": "boolean", "title": "- INA3221 Cuves" },
-        "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
-        "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
-        "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
-        "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
-        "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
-        "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
-        "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },        
-        "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
-        "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
-        "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
-      }
-    })";
-  }
-
-  private:
-  JsonDocument config_json;
-  // Keys for enable / disable sensors in the configuration UI
-  const char* sensor_keys[17] = {
-        "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
-        "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
-        "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
-        "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE", "RUDDER_ANGLE_FEATURE"
-  };
-};
 
 bool ConfigRequiresRestart(const ConfigSensESP& obj);
 const String ConfigSchema(const ConfigSensESP& obj);

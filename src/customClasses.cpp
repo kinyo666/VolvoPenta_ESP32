@@ -6,7 +6,7 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.15
+  @version 1.0.16
   @date 03/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -25,14 +25,10 @@ float linearPositive(float input, float multiplier, float offset) {
 const ParamInfo* linearPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
 
 // Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
-//auto runningState = [](float input, u_int8_t engine_id) -> boolean {
-boolean runningState (float input, u_int8_t engine_id) {
-  #if ENGINE_SLEEP_ENABLE == 1
-  sleepModeINA3221(engine_id, ((input > 1) ? ENGINE_STATE_RUNNING : ENGINE_STATE_NOT_RUNNING));
-  #endif
+boolean runningState(float input) {
   return (input > 0);
 }
-const ParamInfo* runningState_ParamInfo = new ParamInfo[1]{{"engine_state", "Engine State"}};
+//const ParamInfo* runningState_ParamInfo = new ParamInfo[1]{{"engine_id", "Engine ID"}, {"sensesp_config", "SensESP Configuration"}};
 
 const String ConfigSchema(const MotionSensorOffsets& obj) {
   return R"({
