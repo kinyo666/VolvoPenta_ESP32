@@ -7,7 +7,7 @@
   - Use an ADS1115 sensor to read the gypsy inductive sensor and the current sensor
 
   @author kinyo666
-  @version 1.0.18
+  @version 1.0.19
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -38,7 +38,7 @@ const String ConfigSchema(const PersistentIntegrator& obj) {
 return R"({
   "type": "object",
   "properties": {
-      "k": { "title": "Multiplier", "type": "number" },
+      "k": { "title": "Gypsy circumference", "type": "number" },
       "value": { "title": "Value", "type": "number" },
       "threshold": { "title": "Threshold", "type": "number" }
   }

@@ -5,7 +5,7 @@
   - Provide Yaw, Pitch, Roll values in radians
 
   @author kinyo666
-  @version 1.0.18
+  @version 1.0.19
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 
@@ -32,10 +32,10 @@ const String sk_path_motion[3] = { "navigation.attitude", "navigation.headingMag
 const String conf_path_motion = "/CONFIG/MOTION/OFFSETS";
 
 // Class to handle motion sensor offsets for MPU6050
-class MotionSensorOffsets : public sensesp::StringTransform { //, public sensesp::SensorConfig {
+class MotionSensorOffsets : public sensesp::StringTransform {
   public:
   MotionSensorOffsets(const String& config_path = "")
-     : sensesp::StringTransform(config_path) { //, SensorConfig(config_path) {
+     : sensesp::StringTransform(config_path) {
       conf_motionsensor = jdoc_conf_motionsensor.to<JsonObject>();
       valid_offset = sensesp::StringTransform::load();
   }
@@ -144,7 +144,9 @@ class MotionSensorOffsets : public sensesp::StringTransform { //, public sensesp
 };
 
 void setupMotionSensor(ConfigSensESP*);
-bool ConfigRequiresRestart(const MotionSensorOffsets& obj);
-const String ConfigSchema(const MotionSensorOffsets& obj);
+//namespace sensesp {
+//bool ConfigRequiresRestart(const MotionSensorOffsets& obj);
+//const String ConfigSchema(const MotionSensorOffsets& obj);
+//}
 
 #endif // MOTION_SENSOR_H

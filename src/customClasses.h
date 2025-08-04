@@ -6,24 +6,17 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.18
+  @version 1.0.19
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef CUSTOM_CLASSES_H
 #define CUSTOM_CLASSES_H
 
-#include <sensesp.h>
 #include <sensesp/sensors/sensor.h>
-#include <sensesp/transforms/transform.h>
 #include <sensesp/transforms/lambda_transform.h>
-#include <sensesp/transforms/linear.h>
 #include <sensesp/transforms/curveinterpolator.h>
-#include <sensesp/transforms/frequency.h>
-#include <sensesp/transforms/moving_average.h>
-#include <sensesp/transforms/integrator.h>
 #include <sensesp/ui/config_item.h>
-#include <helper_3dmath.h>
 
 // SensESP UI Config order
 #define UI_ORDER_TEMP 10

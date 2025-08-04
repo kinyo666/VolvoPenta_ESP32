@@ -5,7 +5,7 @@
   - Provide Yaw, Pitch, Roll values in radians
 
   @author kinyo666
-  @version 1.0.18
+  @version 1.0.19
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -272,7 +272,7 @@ const String ConfigSchema(const MotionSensorOffsets& obj) {
     }
   })";
 }
-  
+
 bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {
   return true;
 }

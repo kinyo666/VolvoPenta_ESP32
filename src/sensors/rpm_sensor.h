@@ -5,7 +5,7 @@
     - If INA3221_POWERDOWN is enabled, it will power down the INA3221 when the engine is off
   
   @author kinyo666
-  @version 1.0.18
+  @version 1.0.19
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -14,6 +14,10 @@
 
 #include <sensesp/sensors/digital_input.h>
 #include <sensesp/signalk/signalk_output.h>
+#include <sensesp/transforms/linear.h>
+#include <sensesp/transforms/frequency.h>
+#include <sensesp/transforms/moving_average.h>
+
 #include "customClasses.h"
 #include "sensors/voltage_sensor.h"
 
