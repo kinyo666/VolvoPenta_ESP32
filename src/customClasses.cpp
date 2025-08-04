@@ -6,14 +6,13 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.16
+  @version 1.0.17
   @date 03/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "customClasses.h"
 
 namespace sensesp {
-
 // Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
 //auto linearPositive = [](float input, float multiplier, float offset) -> float {
 float linearPositive(float input, float multiplier, float offset) {
@@ -23,30 +22,6 @@ float linearPositive(float input, float multiplier, float offset) {
     return (0.0f);
 }
 const ParamInfo* linearPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
-
-// Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
-boolean runningState(float input) {
-  return (input > 0);
-}
-//const ParamInfo* runningState_ParamInfo = new ParamInfo[1]{{"engine_id", "Engine ID"}, {"sensesp_config", "SensESP Configuration"}};
-
-const String ConfigSchema(const MotionSensorOffsets& obj) {
-  return R"({
-    "type": "object",
-    "properties": {
-        "ax_offset": { "title": "Accel X Offset", "type": "number" },
-        "ay_offset": { "title": "Accel Y Offset", "type": "number" },
-        "az_offset": { "title": "Accel Z Offset", "type": "number" },
-        "gx_offset": { "title": "Gyro X Offset", "type": "number" },
-        "gy_offset": { "title": "Gyro Y Offset", "type": "number" },
-        "gz_offset": { "title": "Gyro Z Offset", "type": "number" }
-    }
-  })";
-  }
-  
-bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {
-  return true;
-}
 
 // Set default configuration schema for ConfigSensESP
 const String ConfigSchema(const ConfigSensESP& obj) {

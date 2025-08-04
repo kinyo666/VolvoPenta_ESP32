@@ -8,7 +8,7 @@
     - Engines INA3221 sensors are powered down after 60 seconds if the engine is off
 
   @author kinyo666
-  @version 1.0.16
+  @version 1.0.17
   @date 03/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -91,8 +91,9 @@ float getVoltageINA3221_OTHERS3_CH3() { return sensor_INA3221[INA3221_OTHERS_3]-
     @param powerdown_mode Power-down mode to set (ENGINE_STATE_RUNNING or ENGINE_STATE_NOT_RUNNING)
     @param read_delay Read delay in milliseconds from ConfigSensESP
 */
-void sleepModeINA3221(u_int8_t engine_id, u_int8_t powerdown_mode, unsigned int read_delay) {
+bool sleepModeINA3221(bool running, u_int8_t engine_id, unsigned int read_delay) {
   u_int8_t INA3221_id = ((engine_id == ENGINE_BABORD) ? INA3221_BABORD_0 : INA3221_TRIBORD_2);
+  u_int8_t powerdown_mode = ((running == true) ? ENGINE_STATE_RUNNING : ENGINE_STATE_NOT_RUNNING);
 
   if (engine_state[engine_id] == ENGINE_STATE_OFF) {          // Engine is off
     if (powerdown_mode == ENGINE_STATE_RUNNING) {
@@ -125,6 +126,8 @@ void sleepModeINA3221(u_int8_t engine_id, u_int8_t powerdown_mode, unsigned int 
                         ((engine_state[engine_id] & ENGINE_STATE_ON) ? "ON" : "OFF"),
                         ((engine_state[engine_id] & ENGINE_STATE_IS_RUNNING) ? "RUNNING" : "NOT RUNNING"));
   #endif
+
+  return (engine_state[engine_id] & ENGINE_STATE_ON);
 }
 
 // Setup the INA3221 Voltage sensor for engine gauges
