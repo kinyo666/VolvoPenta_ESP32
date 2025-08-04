@@ -7,8 +7,8 @@
   - Temperature values are converted to Kelvin and filtered to avoid out of range values
 
   @author kinyo666
-  @version 1.0.16
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef TEMPERATURE_SENSOR_H
@@ -29,14 +29,11 @@
 #include <sensesp_onewire/onewire_temperature.h>
 #include "customClasses.h"
 
-namespace sensesp {
-
 const String sk_path_temp[DS18B20_NB] = {
         "propulsion.babord.exhaustTemperature",
         "propulsion.tribord.exhaustTemperature",
         "environment.inside.engineroom.temperature"};
 
 void setupTemperatureSensors(ConfigSensESP*);
-}
 
 #endif // TEMPERATURE_SENSOR_H

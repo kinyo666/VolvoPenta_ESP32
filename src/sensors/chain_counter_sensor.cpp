@@ -7,17 +7,15 @@
   - Use an ADS1115 sensor to read the gypsy inductive sensor and the current sensor
 
   @author kinyo666
-  @version 1.0.15
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "chain_counter_sensor.h"
 
-namespace sensesp {
-
 // Windlass sensor
 ADS1115 *sensor_ADS1115;                                      // ADS1115 sensor for windlass motor
-Transform<int, int> *sensor_windlass_debounce;                // Windlass sensor (DigitalInputCounter + Debounce)
+sensesp::Transform<int, int> *sensor_windlass_debounce;                // Windlass sensor (DigitalInputCounter + Debounce)
 PersistentIntegrator *chain_counter;                          // Windlass chain counter
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
@@ -250,7 +248,7 @@ void setupWindlassSensor() {
     return; // Exit if the ADS1115 sensor is not initialized
   }
 
-  RepeatSensor<float> *sensor_windlass_A0 = new RepeatSensor<float>(read_delay_windlass, 
+  sensesp::RepeatSensor<float> *sensor_windlass_A0 = new sensesp::RepeatSensor<float>(read_delay_windlass, 
                                                                  readValueADS1115_A0_A1);           // Read the A0-A1 value (windlass) from the ADS1115 sensor
   JsonDocument jdoc_conf_windlass;
   conf_windlass = jdoc_conf_windlass.to<JsonObject>();                                               // Store Windlass configuration
@@ -260,20 +258,20 @@ void setupWindlassSensor() {
                                             conf_path_chain[CHAIN_COUNTER_PATH]);                    // Chain counter in meter
   chain_counter->to_json(conf_windlass);                                                             // Retrieve last saved value if exists
   delay(10);                                                                                         // Wait to avoid RepeatSensor synchronisation issues
-  RepeatSensor<float> *sensor_gypsy_A1 = new RepeatSensor<float>(read_delay_windlass, 
+  sensesp::RepeatSensor<float> *sensor_gypsy_A1 = new sensesp::RepeatSensor<float>(read_delay_windlass, 
                                                                     readValueADS1115_A2);           // Read the A2 value (gypsy) with a delay
-  DebounceInt *chain_debounce = new DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY]);
+  sensesp::DebounceInt *chain_debounce = new sensesp::DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY]);
   sensor_windlass_debounce = sensor_gypsy_A1->connect_to(chain_debounce);                            // Avoid multiples counts
   auto *sensor_windlass_counter = sensor_windlass_debounce->connect_to(chain_counter);               // Add +/- gipsy_circum to the counter
   sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
-    ->connect_to(new SKOutputFloat(sk_path_windlass, 
-                new SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the last float value to SignalK
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_windlass, 
+                new sensesp::SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the last float value to SignalK
 
-  LambdaTransform<float, String> *sensor_windlass_string = new LambdaTransform<float, String>(chainCounterToString);
+  sensesp::LambdaTransform<float, String> *sensor_windlass_string = new sensesp::LambdaTransform<float, String>(chainCounterToString);
   sensor_windlass_counter
     ->connect_to(sensor_windlass_string)
-    ->connect_to(new SKOutputString(sk_path_windlass + ".direction"));                               // Output the last value + direction to SignalK
+    ->connect_to(new sensesp::SKOutputString(sk_path_windlass + ".direction"));                               // Output the last value + direction to SignalK
 
   /* Set SensESP Configuration UI for chain_counter and chain_debounce
      If you want something to appear in the web UI, you first define overloaded ConfigSchema and ConfigRequiresRestart functions for that class.
@@ -290,9 +288,8 @@ void setupWindlassSensor() {
     ->set_sort_order(UI_ORDER_CHAIN+1);
 
   #ifdef DEBUG_MODE
-  sensor_windlass_debounce->connect_to(new SKOutputInt(sk_path_windlass + ".debounce.raw"));
-  sensor_windlass_A0->connect_to(new SKOutputFloat(sk_path_windlass + ".up.raw"));
+  sensor_windlass_debounce->connect_to(new sensesp::SKOutputInt(sk_path_windlass + ".debounce.raw"));
+  sensor_windlass_A0->connect_to(new sensesp::SKOutputFloat(sk_path_windlass + ".up.raw"));
   //sensor_gypsy_A1->connect_to(new SKOutputInt(sk_path_windlass + ".raw"));
   #endif
-  }
 }

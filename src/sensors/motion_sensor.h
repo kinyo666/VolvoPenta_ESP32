@@ -5,7 +5,7 @@
   - Provide Yaw, Pitch, Roll values in radians
 
   @author kinyo666
-  @version 1.0.17
+  @version 1.0.18
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 
@@ -143,9 +143,8 @@ class MotionSensorOffsets : public sensesp::StringTransform { //, public sensesp
   bool valid_offset;                                            // Flag to indicate if the offsets are valid
 };
 
-void setupMotionSensor(sensesp::ConfigSensESP*);
-//namespace sensesp {
+void setupMotionSensor(ConfigSensESP*);
 bool ConfigRequiresRestart(const MotionSensorOffsets& obj);
 const String ConfigSchema(const MotionSensorOffsets& obj);
-//}
+
 #endif // MOTION_SENSOR_H

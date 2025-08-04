@@ -8,17 +8,15 @@
     - Engines INA3221 sensors are powered down after 60 seconds if the engine is off
 
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "voltage_sensor.h"
 
-namespace sensesp {
-
 // Voltage sensors
 INA3221 *sensor_INA3221[INA3221_NB];                          // 4 INA3221 Voltage Sensors with 3 channels each
-RepeatSensor<float> *sensor_volt[INA3221_NB][INA3221_CH_NUM]; // 4 Voltage values for each channel
+sensesp::RepeatSensor<float> *sensor_volt[INA3221_NB][INA3221_CH_NUM]; // 4 Voltage values for each channel
 u_int8_t engine_state[ENGINE_NB] = { ENGINE_STATE_OFF, 
                                     ENGINE_STATE_OFF };       // Engine state for each engine (0 = OFF, 1 = ON, 2 = NOT RUNNING, 3 = RUNNING)
 int engine_timer[ENGINE_NB] = { 0, 0 };                       // Timer to power-down the INA3221 sensors when the engine is off
@@ -142,8 +140,8 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine) {
   // Coolant temperature
   sensor_volt[INA3221_Id][INA3221_CH1]
     ->connect_to(sensor_volt_linearpos_volt2k)    
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1],
-                    new SKMetadata("K", "T° Eau " + engine, "Coolant temperature", "Temp " + engine)));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1],
+                    new sensesp::SKMetadata("K", "T° Eau " + engine, "Coolant temperature", "Temp " + engine)));
 
   ConfigItem(sensor_volt_linearpos_volt2k)
     ->set_title("Température Eau - " + engine)
@@ -151,14 +149,14 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine) {
     ->set_sort_order(UI_ORDER_ENGINE+2);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_Id][INA3221_CH1]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1] + ".raw"));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH1] + ".raw"));
   #endif
 
   // Oil pressure
   sensor_volt[INA3221_Id][INA3221_CH2]
     ->connect_to(sensor_volt_linearpos_volt2pa)    
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2],
-                    new SKMetadata("Pa", "Pression Huile " + engine, "Oil pressure", "Huile " + engine)));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2],
+                    new sensesp::SKMetadata("Pa", "Pression Huile " + engine, "Oil pressure", "Huile " + engine)));
 
   ConfigItem(sensor_volt_linearpos_volt2pa)
     ->set_title("Pression Huile - " + engine)
@@ -166,13 +164,13 @@ void setupVoltageEngineSensors(u_int8_t INA3221_Id, String engine) {
     ->set_sort_order(UI_ORDER_ENGINE+5);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_Id][INA3221_CH2]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2] + ".raw"));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH2] + ".raw"));
   #endif
 
   // Voltage for Volts gauge
   sensor_volt[INA3221_Id][INA3221_CH3]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH3],
-                    new SKMetadata("V", "Volt " + engine, "Alternator voltage", "Volt " + engine)));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_Id][INA3221_CH3],
+                    new sensesp::SKMetadata("V", "Volt " + engine, "Alternator voltage", "Volt " + engine)));
 }
 
 // Setup the INA3221 Voltage sensors for fuel / water tanks
@@ -186,9 +184,9 @@ void setupVoltageTankSensor(u_int8_t INA3221_channel, String location, String ty
 
   sensor_volt[INA3221_CUVES_1][INA3221_channel]
     ->connect_to(sensor_volt_linearpos)
-    ->connect_to(new MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_channel] + "/MOVING_AVERAGE"))
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_channel],
-                  new SKMetadata("m3", "Cuve " + location, "Niveau " + type + " " + location, "Cuve " + location)));
+    ->connect_to(new sensesp::MovingAverage(4, 1.0, conf_path_volt[INA3221_CUVES_1][INA3221_channel] + "/MOVING_AVERAGE"))
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_channel],
+                  new sensesp::SKMetadata("m3", "Cuve " + location, "Niveau " + type + " " + location, "Cuve " + location)));
 
   ConfigItem(sensor_volt_linearpos)
     ->set_title("Cuve " + type + " " + location)
@@ -196,7 +194,7 @@ void setupVoltageTankSensor(u_int8_t INA3221_channel, String location, String ty
     ->set_sort_order(UI_ORDER_TANK+order+1);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_CUVES_1][INA3221_channel]
-    ->connect_to(new SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_channel] + ".raw"));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_volt[INA3221_CUVES_1][INA3221_channel] + ".raw"));
   #endif
 }
 
@@ -206,15 +204,15 @@ void setupVoltageRudderAngleSensor() {
                                                   conf_path_rudder + "/LINEAR_POSITIVE");
   sensor_volt[INA3221_OTHERS_3][INA3221_CH3]
     ->connect_to(sensor_volt_linearpos)
-    ->connect_to(new SKOutputFloat(sk_path_rudder,
-                  new SKMetadata("m", "Angle de barre", "Angle de barre", "Angle de barre")));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_rudder,
+                  new sensesp::SKMetadata("m", "Angle de barre", "Angle de barre", "Angle de barre")));
   ConfigItem(sensor_volt_linearpos)
     ->set_title("Angle de barre")
     ->set_description("Angle de barre - INA3221_CH3 - LinearPositive")
     ->set_sort_order(UI_ORDER_TANK+6);
   #ifdef DEBUG_MODE
   sensor_volt[INA3221_OTHERS_3][INA3221_CH3]
-    ->connect_to(new SKOutputFloat(sk_path_rudder + ".raw"));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_rudder + ".raw"));
   #endif
 }
 
@@ -262,9 +260,9 @@ void setupVoltageSensors(ConfigSensESP* sensesp_config) {
 
   // Setup port voltage sensors
   if (sensorFound[INA3221_BABORD_0]) {
-    sensor_volt[INA3221_BABORD_0][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH1);
-    sensor_volt[INA3221_BABORD_0][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH2);
-    sensor_volt[INA3221_BABORD_0][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH3);
+    sensor_volt[INA3221_BABORD_0][INA3221_CH1] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH1);
+    sensor_volt[INA3221_BABORD_0][INA3221_CH2] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH2);
+    sensor_volt[INA3221_BABORD_0][INA3221_CH3] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_BABORD0_CH3);
     if (sensesp_config->is_enabled("INA3221_POWERDOWN"))
       engine_timer[ENGINE_BABORD] = ENGINE_SLEEP_TIMER * 1000 / read_delay;
     setupVoltageEngineSensors(INA3221_BABORD_0, "Babord");
@@ -272,9 +270,9 @@ void setupVoltageSensors(ConfigSensESP* sensesp_config) {
 
   // Setup tank voltage sensors
   if (sensorFound[INA3221_CUVES_1]) {
-    sensor_volt[INA3221_CUVES_1][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH1);
-    sensor_volt[INA3221_CUVES_1][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH2);
-    sensor_volt[INA3221_CUVES_1][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH3);
+    sensor_volt[INA3221_CUVES_1][INA3221_CH1] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH1);
+    sensor_volt[INA3221_CUVES_1][INA3221_CH2] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH2);
+    sensor_volt[INA3221_CUVES_1][INA3221_CH3] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_CUVES1_CH3);
     setupVoltageTankSensor(INA3221_CH1, "Babord", "Carburant", 0);    // Fuel tank volume on portside
     setupVoltageTankSensor(INA3221_CH2, "Tribord", "Carburant", 2);   // Fuel tank volume on starboard
     setupVoltageTankSensor(INA3221_CH3, "Eau", "Inox", 4);            // Water tank volume
@@ -282,9 +280,9 @@ void setupVoltageSensors(ConfigSensESP* sensesp_config) {
 
   // Setup starboard voltage sensors
   if (sensorFound[INA3221_TRIBORD_2]) {
-    sensor_volt[INA3221_TRIBORD_2][INA3221_CH1] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH1);
-    sensor_volt[INA3221_TRIBORD_2][INA3221_CH2] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH2);
-    sensor_volt[INA3221_TRIBORD_2][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH3);
+    sensor_volt[INA3221_TRIBORD_2][INA3221_CH1] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH1);
+    sensor_volt[INA3221_TRIBORD_2][INA3221_CH2] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH2);
+    sensor_volt[INA3221_TRIBORD_2][INA3221_CH3] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_TRIBORD2_CH3);
     if (sensesp_config->is_enabled("INA3221_POWERDOWN"))
         engine_timer[ENGINE_TRIBORD] = ENGINE_SLEEP_TIMER * 1000 / read_delay;
     setupVoltageEngineSensors(INA3221_TRIBORD_2, "Tribord");
@@ -293,9 +291,8 @@ void setupVoltageSensors(ConfigSensESP* sensesp_config) {
   // Setup others voltage sensors like rudder angle sensor
   if (sensorFound[INA3221_OTHERS_3]) { 
     if (sensesp_config->is_enabled("RUDDER_ANGLE_FEATURE")) {
-      sensor_volt[INA3221_OTHERS_3][INA3221_CH3] = new RepeatSensor<float>(read_delay, getVoltageINA3221_OTHERS3_CH3);
+      sensor_volt[INA3221_OTHERS_3][INA3221_CH3] = new sensesp::RepeatSensor<float>(read_delay, getVoltageINA3221_OTHERS3_CH3);
       setupVoltageRudderAngleSensor();
     }
   }
 }
-} // namespace sensesp

@@ -6,8 +6,8 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef CUSTOM_CLASSES_H
@@ -46,16 +46,15 @@
 #define DEBUG_MODE_CUSTOM_CLASSES_H 1
 #define DEBUG_MODE 1
 
-namespace sensesp {
 const String conf_path_global = "/CONFIG/SENSORS_CONFIG";
-extern const ParamInfo *linearPositive_ParamInfo;
+extern const sensesp::ParamInfo *linearPositive_ParamInfo;
 
-typedef LambdaTransform<float, float, float, float> LinearPos;
+typedef sensesp::LambdaTransform<float, float, float, float> LinearPos;
 
 float linearPositive(float, float, float);
 
 // Load and save SensESP configuration to enable/disable sensors
-class ConfigSensESP : public SensorConfig {
+class ConfigSensESP : public sensesp::SensorConfig {
   public:
   ConfigSensESP(const String& config_path = conf_path_global) : SensorConfig(config_path) {
     // Load current configuration otherwise set default values to true for all sensors
@@ -163,7 +162,7 @@ class ConfigSensESP : public SensorConfig {
 };
 
 // Temperature Interpreter (MD2030 based)
-class CoolantTemperature : public CurveInterpolator {
+class CoolantTemperature : public sensesp::CurveInterpolator {
  public:
   CoolantTemperature(String config_path = "")
       : CurveInterpolator(NULL, config_path) {
@@ -184,7 +183,7 @@ class CoolantTemperature : public CurveInterpolator {
 };
 
 // Oil Pressure Interpreter
-class OilPressure : public CurveInterpolator {
+class OilPressure : public sensesp::CurveInterpolator {
  public:
   OilPressure(String config_path = "")
       : CurveInterpolator(NULL, config_path) {
@@ -293,5 +292,5 @@ SKMetadata getEnginesSKMetadata() {
   return *engine_skmeta;
 }
 */
-}
+
 #endif // CUSTOM_CLASSES_H

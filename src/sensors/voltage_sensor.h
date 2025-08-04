@@ -8,8 +8,8 @@
     - Engines INA3221 sensors are powered down after 60 seconds if the engine is off
 
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef VOLTAGE_SENSOR_H
@@ -34,8 +34,6 @@
 #define ENGINE_STATE_RUNNING      0x011
 #define ENGINE_STATE_IS_RUNNING   0x010
 
-namespace sensesp {
-
 const String sk_path_volt[INA3221_NB][INA3221_CH_NUM] = {
         {"propulsion.babord.coolantTemperature",  "propulsion.babord.oilPressure",    "propulsion.babord.alternatorVoltage"},
         {"tanks.fuel.babord.currentVolume",       "tanks.fuel.tribord.currentVolume", "tanks.freshWater.eaudouce.currentVolume"},
@@ -51,5 +49,5 @@ const String conf_path_rudder = "/CONFIG/RUDDER";
 
 bool sleepModeINA3221(bool, u_int8_t, unsigned int);
 void setupVoltageSensors(ConfigSensESP*);
-}
+
 #endif // VOLTAGE_SENSOR_H

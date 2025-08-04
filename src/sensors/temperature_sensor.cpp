@@ -7,19 +7,17 @@
   - Temperature values are converted to Kelvin and filtered to avoid out of range values
 
   @author kinyo666
-  @version 1.0.16
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "temperature_sensor.h"
-
-namespace sensesp {
 
 // Filter Kelvin values out of range
 auto filterKelvinValues = [](float input, float offset = 273.15, float max = 413.1) -> float {
     return ((((input - offset) > 0) && (input < max)) ? input : offset);
 };
-const ParamInfo* filterKelvinValues_ParamInfo = new ParamInfo[2]{{"offset", "Offset"}, {"max", "Max value"}};
+const sensesp::ParamInfo* filterKelvinValues_ParamInfo = new sensesp::ParamInfo[2]{{"offset", "Offset"}, {"max", "Max value"}};
 
 // Returns the temperature sensor location by its 1-Wire address
 int getTemperatureSensorLocation(String sensor_addr) {
@@ -50,22 +48,22 @@ void setupTemperatureSensors(ConfigSensESP* sensesp_config) {
         case DS18B20_BABORD_0 : {
           if (sensesp_config->is_enabled("DS18B20_BABORD_0"))
             sensor_temp[DS18B20_BABORD_0]
-              ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_BABORD_0], "",
-                          new SKMetadata("K", "Echappt Babord", sk_path_temp[DS18B20_BABORD_0], "T° Echappement Moteur Babord")));
+              ->connect_to(new sensesp::SKOutputFloat(sk_path_temp[DS18B20_BABORD_0], "",
+                          new sensesp::SKMetadata("K", "Echappt Babord", sk_path_temp[DS18B20_BABORD_0], "T° Echappement Moteur Babord")));
           break;
         }
         case DS18B20_TRIBORD_1 : {
           if (sensesp_config->is_enabled("DS18B20_TRIBORD_1"))
             sensor_temp[DS18B20_TRIBORD_1]
-              ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_TRIBORD_1], "",
-                          new SKMetadata("K", "Echappt Tribord", sk_path_temp[DS18B20_TRIBORD_1], "T° Echappement Moteur Tribord")));
+              ->connect_to(new sensesp::SKOutputFloat(sk_path_temp[DS18B20_TRIBORD_1], "",
+                          new sensesp::SKMetadata("K", "Echappt Tribord", sk_path_temp[DS18B20_TRIBORD_1], "T° Echappement Moteur Tribord")));
           break;
         }
         case DS18B20_COMMON_2 : {
           if (sensesp_config->is_enabled("DS18B20_COMMON_2"))
             sensor_temp[DS18B20_COMMON_2]
-              ->connect_to(new SKOutputFloat(sk_path_temp[DS18B20_COMMON_2], "",
-                          new SKMetadata("K", "Compartiment Moteur", sk_path_temp[DS18B20_COMMON_2], "T° Compartiment Moteur")));
+              ->connect_to(new sensesp::SKOutputFloat(sk_path_temp[DS18B20_COMMON_2], "",
+                          new sensesp::SKMetadata("K", "Compartiment Moteur", sk_path_temp[DS18B20_COMMON_2], "T° Compartiment Moteur")));
           break;
         }
         default : {
@@ -78,5 +76,4 @@ void setupTemperatureSensors(ConfigSensESP* sensesp_config) {
         }
       };
   }
-}
 }

@@ -5,7 +5,7 @@
   - Provide Yaw, Pitch, Roll values in radians
 
   @author kinyo666
-  @version 1.0.17
+  @version 1.0.18
   @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -182,7 +182,7 @@ void calibrateMotionSensor(MotionSensorOffsets* sensor_motion_offsets) {
 // Setup the motion sensor MPU6050
 // This function initializes the MPU6050 motion sensor, calibrates it if needed, and sets the offsets.
 // @link https://registry.platformio.org/libraries/electroniccats/MPU6050
-void setupMotionSensor(sensesp::ConfigSensESP* sensesp_config) {
+void setupMotionSensor(ConfigSensESP* sensesp_config) {
   uint8_t devStatus;                                            // Return status after each device operation (0 = success, !0 = error)
   unsigned int read_delay = sensesp_config->get_read_delay();
 
@@ -258,7 +258,7 @@ void setupMotionSensor(sensesp::ConfigSensESP* sensesp_config) {
   }
   #endif
 }
-//namespace sensesp {
+
 const String ConfigSchema(const MotionSensorOffsets& obj) {
   return R"({
     "type": "object",
@@ -276,4 +276,3 @@ const String ConfigSchema(const MotionSensorOffsets& obj) {
 bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {
   return true;
 }
-//}

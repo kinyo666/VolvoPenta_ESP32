@@ -7,8 +7,8 @@
   - Use an ADS1115 sensor to read the gypsy inductive sensor and the current sensor
 
   @author kinyo666
-  @version 1.0.15
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef CHAIN_COUNTER_SENSOR_H
@@ -34,15 +34,13 @@
 #define ADS1115_WINDLASS_ADDR ADS1115_I2C_ADDR_VDD        // I2C address = 0x49 VDD
 #define ADS1115_WINDLASS_THRESHOLD 26400                  // Windlass threshold (depending on the HSTS016L sensor and PGA used)
 
-namespace sensesp {
-
 const String sk_path_windlass = "navigation.anchor.rodeDeployed";
 const String conf_path_chain[CHAIN_COUNTER_NB] = { "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
 const float gipsy_circum = 0.43982;                           // Windlass gipsy circumference (meter) - r = 85 mm ; c = 0.534071 m
 const unsigned int read_delay_windlass = 500;                 // Windlass read delay = 0.5s
 
 // Override Integrator class with persistent last value, gipsy_circum and A0 pin threshold configuration
-class PersistentIntegrator : public Transform<int, float> {
+class PersistentIntegrator : public sensesp::Transform<int, float> {
   public:
   PersistentIntegrator(float gipsy_circum = 1.0, float rode_deployed = 0.0, float a0_threshold = 26400, const String& config_path = "")
      : Transform<int, float>(config_path), k{gipsy_circum}, value{rode_deployed}, threshold{a0_threshold} {
@@ -92,5 +90,4 @@ void setupWindlassSensor();
 bool ConfigRequiresRestart(const PersistentIntegrator& obj);
 const String ConfigSchema(const PersistentIntegrator& obj);
 
-}
 #endif // CHAIN_COUNTER_SENSOR_H

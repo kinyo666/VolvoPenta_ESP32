@@ -5,8 +5,8 @@
     - If INA3221_POWERDOWN is enabled, it will power down the INA3221 when the engine is off
   
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef RPM_SENSOR_H
@@ -32,7 +32,6 @@
 #define PC817_BABORD_PIN 35
 #define PC817_TRIBORD_PIN 34
 
-namespace sensesp {
 // Constants for Signal-K path
 const String sk_path_engines[ENGINE_NB][ENGINE_SK_PATH_NB] = {
         {"propulsion.babord.revolutions",   "propulsion.babord.fuel.rate",  "propulsion.babord.state"},
@@ -42,14 +41,14 @@ const String conf_path_engines[ENGINE_NB][2] = {{"/CONFIG/BABORD/PC817/FREQUENCY
 // Engines state and timer (in seconds) to power-down sensors
 enum engine_sk_path_t { REVOLUTIONS = 0, FUELRATE, STATE };
 
-typedef LambdaTransform<float, boolean> EngineState;
-typedef LambdaTransform<bool, bool, u_int8_t, unsigned int> EngineSleepMode;
+typedef sensesp::LambdaTransform<float, boolean> EngineState;
+typedef sensesp::LambdaTransform<bool, bool, u_int8_t, unsigned int> EngineSleepMode;
 
 void setupRPMSensors(ConfigSensESP*);
 boolean runningState(float);
 
 // Fuel Consumption for TAMD40B based on https://www.volvopenta.com/your-engine/manuals-and-handbooks/ (see Product Leaflet)
-class FuelConsumption : public CurveInterpolator {
+class FuelConsumption : public sensesp::CurveInterpolator {
  public:
   FuelConsumption(String config_path = "")
       : CurveInterpolator(NULL, config_path) {
@@ -79,20 +78,20 @@ class FuelConsumption : public CurveInterpolator {
 // Define the engines transform to output data to Signal-K
 class EngineDataTransform {
   public :
-    Frequency *freq;
-    Linear *hz_to_rpm;
+    sensesp::Frequency *freq;
+    sensesp::Linear *hz_to_rpm;
     FuelConsumption *rpm_to_lhr;
     LinearPos *lhr_to_m3s;
-    MovingAverage *moving_avg;
+    sensesp::MovingAverage *moving_avg;
     EngineState *running_state;
 
     EngineDataTransform(float multiplier, const String *conf_path_engine, u_int engine_id) { 
-        freq = new Frequency(multiplier, conf_path_engine[PC817_FREQUENCY_RPM]);    // Pulses to Hertz (Hz)
-        hz_to_rpm = new Linear(60, 0.0);                                            // Hertz (Hz) to Revolutions Per Minute (RPM)
+        freq = new sensesp::Frequency(multiplier, conf_path_engine[PC817_FREQUENCY_RPM]);    // Pulses to Hertz (Hz)
+        hz_to_rpm = new sensesp::Linear(60, 0.0);                                            // Hertz (Hz) to Revolutions Per Minute (RPM)
         rpm_to_lhr = new FuelConsumption();                                         // RPM to Liter per Hour (l/hr)
         lhr_to_m3s = new LinearPos(linearPositive, 1 / (3.6 * pow(10, 6)), 
                                   0.0, linearPositive_ParamInfo);                   // Liter per Hour (l/hr) to Meter cube per second (m3/s)
-        moving_avg = new MovingAverage(4, 1.0, conf_path_engine[PC817_MOVING_AVG]); // Moving average with 4 samples
+        moving_avg = new sensesp::MovingAverage(4, 1.0, conf_path_engine[PC817_MOVING_AVG]); // Moving average with 4 samples
         running_state = new EngineState(runningState);                              // Hertz (Hz) to running state (true or false)
 
         ConfigItem(freq)
@@ -112,5 +111,4 @@ class EngineDataTransform {
       }
 };
 
-}
 #endif // RPM_SENSOR_H

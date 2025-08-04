@@ -5,13 +5,12 @@
     - If INA3221_POWERDOWN is enabled, it will power down the INA3221 when the engine is off
   
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "sensors/rpm_sensor.h"
 
-namespace sensesp {
 // Simulate RPM for testing purposes
 // This function simulates a pulse on the PC817 sensor to generate a constant RPM value
 #ifdef SIMULATE_RPM
@@ -25,12 +24,12 @@ float simulateRPM() {
 #endif
 
 #ifndef FAKE_MODE
-DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 PC817 RPM Sensors values
+sensesp::DigitalInputCounter *sensor_engine[ENGINE_NB];                // 2 PC817 RPM Sensors values
 #else
-FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake RPM Sensor values
+sensesp::FloatConstantSensor *sensor_engine[ENGINE_NB];                // Fake RPM Sensor values
 #endif
 
-const ParamInfo* sleepModeINA3221_ParamInfo = new ParamInfo[2]{{"engine_id", "Engine ID"}, {"read_delay", "Read delay"}};
+const sensesp::ParamInfo* sleepModeINA3221_ParamInfo = new sensesp::ParamInfo[2]{{"engine_id", "Engine ID"}, {"read_delay", "Read delay"}};
 
 // Callback for Engine State (Lambda Transform returns true if engine is running, false otherwise)
 boolean runningState(float input) {
@@ -50,43 +49,43 @@ void setupPC817Sensor(u_int8_t engine_id, String engine, u_int8_t PC817_pin, Con
   // Step 2 : instanciates DigitalInputCounter to read PC817 sensor values
   #ifndef FAKE_MODE
   const unsigned int read_rpm_delay = 500;
-  sensor_engine[engine_id] = new DigitalInputCounter(PC817_pin, INPUT, RISING, read_rpm_delay);   // INPUT for GPIO 32-35 or INPUT_PULLUP for others pins
+  sensor_engine[engine_id] = new sensesp::DigitalInputCounter(PC817_pin, INPUT, RISING, read_rpm_delay);   // INPUT for GPIO 32-35 or INPUT_PULLUP for others pins
   #else
   sensor_engine[engine_id] = new FloatConstantSensor(50.0, 1, "/config/engine/EL817/CONSTANT");   // Fake sensor for test purpose
   #endif
   #ifdef DEBUG_MODE
-  sensor_engine[engine_id]->connect_to(new SKOutputFloat(sk_path_engines[engine_id][REVOLUTIONS] + ".raw"));
+  sensor_engine[engine_id]->connect_to(new sensesp::SKOutputFloat(sk_path_engines[engine_id][REVOLUTIONS] + ".raw"));
   #endif
 
   // Step 3 : connects the output of sensor to the input of Frequency() and the Signal K output as a float in Hz
   sensor_engine[engine_id]
     ->connect_to(engine_data->freq)
     ->connect_to(engine_data->moving_avg)
-    ->connect_to(new SKOutputFloat(sk_path_engines[engine_id][REVOLUTIONS], 
-                  new SKMetadata("Hz", "Moteur " + engine, "Engine revolutions (x60 for RPM)", "RPM")));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_engines[engine_id][REVOLUTIONS], 
+                  new sensesp::SKMetadata("Hz", "Moteur " + engine, "Engine revolutions (x60 for RPM)", "RPM")));
 
   // Step 4 : transforms the output of Frequency to RPM and Liter per hour from FuelConsumption
   engine_data->freq
     ->connect_to(engine_data->hz_to_rpm)
     ->connect_to(engine_data->rpm_to_lhr)
     ->connect_to(engine_data->lhr_to_m3s)
-    ->connect_to(new SKOutputFloat(sk_path_engines[engine_id][FUELRATE],
-                  new SKMetadata("m3/s", "Conso " + engine, "Fuel rate of consumption", "L/hr")));
+    ->connect_to(new sensesp::SKOutputFloat(sk_path_engines[engine_id][FUELRATE],
+                  new sensesp::SKMetadata("m3/s", "Conso " + engine, "Fuel rate of consumption", "L/hr")));
 
   // Step 5 : changes the engine state if needed
   engine_running_state = 
   engine_data->freq
     ->connect_to(engine_data->running_state);
   engine_running_state
-    ->connect_to(new SKOutputBool(sk_path_engines[engine_id][STATE]));
+    ->connect_to(new sensesp::SKOutputBool(sk_path_engines[engine_id][STATE]));
 
   // Step 6 : forces to power down the INA3221 if the engine is off
   if (sensesp_config->is_enabled("INA3221_POWERDOWN")) {
     engine_sleep_mode = new EngineSleepMode(sleepModeINA3221, engine_id, read_delay_timer, sleepModeINA3221_ParamInfo);
     engine_running_state
         ->connect_to(engine_sleep_mode)
-        ->connect_to(new SKOutputBool(sk_path_engines[engine_id][STATE] + ".powerdown",
-                    new SKMetadata("boolean", "Power Down " + engine, "Power down state of INA3221", "Power Down")));
+        ->connect_to(new sensesp::SKOutputBool(sk_path_engines[engine_id][STATE] + ".powerdown",
+                    new sensesp::SKMetadata("boolean", "Power Down " + engine, "Power down state of INA3221", "Power Down")));
   }
 }
 
@@ -110,5 +109,4 @@ void setupRPMSensors(ConfigSensESP* sensesp_config) {
     pinMode(SIMULATE_RPM_PIN, OUTPUT); // Simulate RPM for testing purposes
     RepeatSensor<float> *sensor_simulate_rpm = new RepeatSensor<float>(100, simulateRPM);
     #endif
-}
 }

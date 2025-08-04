@@ -20,8 +20,8 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @ref SensESP v3.1.0
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
@@ -52,13 +52,8 @@
 #define LANG_EN 0
 #define LANG_FR 1
 
-using namespace sensesp;
-//using namespace sensesp::onewire;
-
 // SensESP Configuration
-
-//const unsigned int sensor_read_delay = 1000;                         // Sensors read delay = 1s
-ConfigSensESP *sensesp_config;                                // Sensors activation
+ConfigSensESP *sensesp_config;                                // Sensors activation + read delay = 1s
 
 // SensESP builds upon the ReactESP framework. Every ReactESP application must instantiate the "app" object.
 reactesp::EventLoop app;
@@ -66,15 +61,15 @@ reactesp::EventLoop app;
 // The setup function performs one-time application initialization.
 void setup() {
   #ifdef DEBUG_MODE
-  SetupLogging(ESP_LOG_DEBUG); //ESP_LOG_VERBOSE); 
+  sensesp::SetupLogging(ESP_LOG_DEBUG); //ESP_LOG_VERBOSE); 
   #else
   SetupLogging(ESP_LOG_INFO);
   #endif
   Serial.begin(115200);
 
   // Create the global SensESPApp() object.
-  SensESPAppBuilder builder;
-  sensesp_app = builder.set_hostname("birchwood-ESP32")->get_app();
+  sensesp::SensESPAppBuilder builder;
+  sensesp::sensesp_app = builder.set_hostname("birchwood-ESP32")->get_app();
   sensesp_config = new ConfigSensESP(conf_path_global);
 
   if (sensesp_config->is_enabled("DS18B20_FEATURE"))
@@ -92,6 +87,6 @@ void setup() {
 // The loop function is called in an endless loop during program execution.
 // It simply calls `app.tick()` which will then execute all reactions as needed.
 void loop() { 
-  static auto event_loop = SensESPBaseApp::get_event_loop();
+  static auto event_loop = sensesp::SensESPBaseApp::get_event_loop();
   event_loop->tick();
 }

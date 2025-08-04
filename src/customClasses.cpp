@@ -6,13 +6,12 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.17
-  @date 03/08/2025
+  @version 1.0.18
+  @date 04/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "customClasses.h"
 
-namespace sensesp {
 // Callback for Linear Positive (Lambda Transform returns 0.0 if not positive)
 //auto linearPositive = [](float input, float multiplier, float offset) -> float {
 float linearPositive(float input, float multiplier, float offset) {
@@ -21,7 +20,7 @@ float linearPositive(float input, float multiplier, float offset) {
   else
     return (0.0f);
 }
-const ParamInfo* linearPositive_ParamInfo = new ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
+const sensesp::ParamInfo* linearPositive_ParamInfo = new sensesp::ParamInfo[2]{{"multiplier", "Multiplier"}, {"offset", "Offset"}};
 
 // Set default configuration schema for ConfigSensESP
 const String ConfigSchema(const ConfigSensESP& obj) {
@@ -52,5 +51,4 @@ const String ConfigSchema(const ConfigSensESP& obj) {
 // Set requires restart to true for ConfigSensESP
 bool ConfigRequiresRestart(const ConfigSensESP& obj) {
   return true;
-}
 }
