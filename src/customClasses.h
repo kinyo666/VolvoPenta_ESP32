@@ -6,8 +6,8 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.19
-  @date 04/08/2025
+  @version 1.0.20
+  @date 06/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef CUSTOM_CLASSES_H
@@ -36,7 +36,7 @@
 #define PC817_FREQUENCY_RPM 0
 #define PC817_MOVING_AVG 1
 
-#define DEBUG_MODE_CUSTOM_CLASSES_H 1
+// Debug mode (verbose logs)
 #define DEBUG_MODE 1
 
 const String conf_path_global = "/CONFIG/SENSORS_CONFIG";
@@ -64,7 +64,7 @@ class ConfigSensESP : public sensesp::SensorConfig {
                     ->set_requires_restart(true)
                     ->set_sort_order(0);
 
-    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+    #ifdef DEBUG_MODE
       Serial.println("SENSORS CONFIG :");
       String jsonify;
       serializeJsonPretty(config_json, jsonify);
