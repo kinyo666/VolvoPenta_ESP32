@@ -20,23 +20,23 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.18
-  @date 04/08/2025
+  @version 1.0.20
+  @date 06/08/2025
   @ref SensESP v3.1.0
+
+  Technical documentation :
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
-  @link Thanks to Mat Baileys (Boating with the Baileys) : https://github.com/Boatingwiththebaileys/ESP32-code
-  @link Thanks to Jason Greenwood (Après) : https://github.com/Techstyleuk
   @link https://www.arduino.cc/reference/en/libraries/ina3221/
   @link https://signalk.org/specification/1.7.0/schemas/definitions.json
+
+  Special thanks to :
+  @link Matti Airas (SensESP framework) : https://github.com/SignalK/SensESP
+  @link Mat Baileys (Boating with the Baileys) : https://github.com/Boatingwiththebaileys/ESP32-code
+  @link Jason Greenwood (Après) : https://github.com/Techstyleuk
   */
 #include <sensesp.h>
 #include <sensesp_app_builder.h>
-//#include <sensesp/transforms/repeat.h>
-//#include <sensesp/sensors/constant_sensor.h>
-//#include <sensesp/sensors/digital_input.h>
-//#include <sensesp/signalk/signalk_output.h>
-//#include <Wire.h>
 #include "customClasses.h"
 #include "sensors/chain_counter_sensor.h"
 #include "sensors/temperature_sensor.h"
