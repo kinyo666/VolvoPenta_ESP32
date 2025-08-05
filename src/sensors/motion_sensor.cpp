@@ -1,22 +1,25 @@
 /*
   Motion sensor :
   - MPU6050 6-axis motion sensor
-  - Load and save offsets for the motion sensor
+  - Load and save the motion sensor offsets
   - Provide Yaw, Pitch, Roll values in radians
 
   @author kinyo666
-  @version 1.0.19
-  @date 04/08/2025
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @version 1.0.20
+  @date 06/08/2025
+  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32 
 */
-#include "sensors/motion_sensor.h"
+#include "motion_sensor.h"
+
+// This is a workaround for the ConfigSchema() conflict with constant_sensor.h
+#include <sensesp/sensors/constant_sensor.h>
 
 // Motion and compass sensor
 MPU6050 sensor_mpu;                                           // 1 MPU-6050 Motion sensor
 #ifndef FAKE_MODE
 sensesp::RepeatSensor<float> *sensor_compass;                          // MPU Compass values
 #else
-FloatConstantSensor *sensor_compass;                          // Fake Compass values
+sensesp::FloatConstantSensor *sensor_compass;                          // Fake Compass values
 #endif
 
 // Callback for motion sensor Yaw/Pitch/Roll
@@ -150,7 +153,7 @@ void calibrateMotionSensor(MotionSensorOffsets* sensor_motion_offsets) {
   motion_sensor_offsets = sensor_mpu.GetActiveOffsets();  // Get the active offsets from the MPU6050
 
   #ifdef DEBUG_MODE
-  Serial.println("Active offsets : ");
+  Serial.print("\nMOTION SENSOR : Active offsets -> ");
   //	A_OFFSET_H_READ_A_OFFS(Data);
   Serial.printf("Acceleration X = %i\tY = %i\tZ = %i | ", 
         motion_sensor_offsets[0],
@@ -170,13 +173,11 @@ void calibrateMotionSensor(MotionSensorOffsets* sensor_motion_offsets) {
     String(motion_sensor_offsets[3]) + "|" +
     String(motion_sensor_offsets[4]) + "|" +
     String(motion_sensor_offsets[5]);
-
-  // TODO : resolve the conflict "multiple definition of `String const sensesp::ConfigSchemaSensorType<String>(String const&)';" 
   
   // Sends the offsets to the Signal K server and save the motion sensor offsets
-  //sensesp::StringConstantSensor *sensor_string_offsets = new sensesp::StringConstantSensor(motion_string_offsets, 600);
-  //sensor_string_offsets->connect_to(sensor_motion_offsets);
-  //sensor_motion_offsets->connect_to(new sensesp::SKOutputRawJson(sk_path_motion[MPU6050_OFFSETS]));
+  sensesp::StringConstantSensor *sensor_string_offsets = new sensesp::StringConstantSensor(motion_string_offsets, 600);
+  sensor_string_offsets->connect_to(sensor_motion_offsets);
+  sensor_motion_offsets->connect_to(new sensesp::SKOutputRawJson(sk_path_motion[MPU6050_OFFSETS]));
 }
 
 // Setup the motion sensor MPU6050
@@ -195,20 +196,20 @@ void setupMotionSensor(ConfigSensESP* sensesp_config) {
   #endif
 
   // Initialize device
-  Serial.println(F("Initializing I2C devices..."));
+  Serial.println(F("MOTION SENSOR : Initializing I2C devices..."));
   sensor_mpu.initialize();
 
   // Verify connection
-  Serial.println(F("Testing MPU6050 connection..."));
+  Serial.println(F("MOTION SENSOR : Testing MPU6050 connection..."));
   if (sensor_mpu.testConnection() == false) {
-    Serial.println("MPU6050 connection failed");
+    Serial.println("MOTION SENSOR : MPU6050 connection failed");
     return;
   }
   else
-    Serial.println("MPU6050 connection successful");
+    Serial.println("MOTION SENSOR : MPU6050 connection successful");
 
   // Initializate and configure the DMP
-  Serial.println(F("Initializing DMP..."));
+  Serial.println(F("MOTION SENSOR : Initializing DMP..."));
   devStatus = sensor_mpu.dmpInitialize();
   
   // Making sure it worked (returns 0 if so)
@@ -220,14 +221,14 @@ void setupMotionSensor(ConfigSensESP* sensesp_config) {
     setMotionSensorOffsets(sensor_motion_offsets);         // Set offsets using the saved values or the calibrated values
 
     // Make the offsets editable in the SensESP UI
-    sensesp::ConfigItem(sensor_motion_offsets)
-      ->set_title("Gyroscope - Offsets")
+    ConfigItem(sensor_motion_offsets)
+      ->set_title("Motion Sensor - Acceleration and Gyroscope Offsets")
       ->set_description("Offsets - MPU6050 - MotionSensorOffsets")
       ->set_sort_order(UI_ORDER_MOTION);
 
-    Serial.print(F("Enabling DMP..."));   // Turning ON DMP
+    Serial.println(F("MOTION SENSOR : Enabling DMP..."));   // Turning ON DMP
     sensor_mpu.setDMPEnabled(true);
-    Serial.println(F("DMP ready !"));
+    Serial.println(F("MOTION SENSOR : DMP ready !"));
     uint16_t packetSize = sensor_mpu.dmpGetFIFOPacketSize(); // Get expected DMP packet size for later comparison
 
     // Read motion sensor values every read_delay milliseconds
@@ -250,7 +251,7 @@ void setupMotionSensor(ConfigSensESP* sensesp_config) {
   }
   #ifdef DEBUG_MODE
   else {
-    Serial.print(F("DMP Initialization failed (code ")); // Print the error code
+    Serial.print(F("MOTION SENSOR : DMP Initialization failed (code ")); // Print the error code
     Serial.print(devStatus);
     Serial.println(F(")"));
     // 1 = initial memory load failed
@@ -260,17 +261,17 @@ void setupMotionSensor(ConfigSensESP* sensesp_config) {
 }
 
 const String ConfigSchema(const MotionSensorOffsets& obj) {
-  return R"({
-    "type": "object",
-    "properties": {
-        "ax_offset": { "title": "Accel X Offset", "type": "number" },
-        "ay_offset": { "title": "Accel Y Offset", "type": "number" },
-        "az_offset": { "title": "Accel Z Offset", "type": "number" },
-        "gx_offset": { "title": "Gyro X Offset", "type": "number" },
-        "gy_offset": { "title": "Gyro Y Offset", "type": "number" },
-        "gz_offset": { "title": "Gyro Z Offset", "type": "number" }
-    }
-  })";
+    return R"({
+        "type": "object",
+        "properties": {
+            "ax_offset": { "title": "Accel X Offset", "type": "number" },
+            "ay_offset": { "title": "Accel Y Offset", "type": "number" },
+            "az_offset": { "title": "Accel Z Offset", "type": "number" },
+            "gx_offset": { "title": "Gyro X Offset", "type": "number" },
+            "gy_offset": { "title": "Gyro Y Offset", "type": "number" },
+            "gz_offset": { "title": "Gyro Z Offset", "type": "number" }
+        }
+    })";
 }
 
 bool ConfigRequiresRestart(const MotionSensorOffsets& obj) {

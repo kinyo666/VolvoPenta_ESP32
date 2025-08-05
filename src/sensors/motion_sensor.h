@@ -1,20 +1,17 @@
 /*
   Motion sensor :
   - MPU6050 6-axis motion sensor
-  - Load and save offsets for the motion sensor
+  - Load and save the motion sensor offsets
   - Provide Yaw, Pitch, Roll values in radians
 
   @author kinyo666
-  @version 1.0.19
-  @date 04/08/2025
+  @version 1.0.20
+  @date 06/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
-
-  TODO : find a workaround for the offsets config conflict with constant_sensor.h
 */
 #ifndef MOTION_SENSOR_H
 #define MOTION_SENSOR_H
 
-//#include <sensesp/sensors/constant_sensor.h>
 #include <sensesp/sensors/sensor.h>
 #include <sensesp/signalk/signalk_output.h>
 #include <MPU6050_6Axis_MotionApps20.h>
@@ -37,7 +34,7 @@ class MotionSensorOffsets : public sensesp::StringTransform {
   MotionSensorOffsets(const String& config_path = "")
      : sensesp::StringTransform(config_path) {
       conf_motionsensor = jdoc_conf_motionsensor.to<JsonObject>();
-      valid_offset = sensesp::StringTransform::load();
+      valid_offset = this->load(); //StringTransform::load();
   }
 
   inline void set(const String input) {
@@ -70,8 +67,8 @@ class MotionSensorOffsets : public sensesp::StringTransform {
     // Save the updated configuration to the file system
     serializeJsonPretty(conf_motionsensor, output_);
     notify();
-    valid_offset = sensesp::StringTransform::save();
-    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+    valid_offset = this->save();
+    #ifdef DEBUG_MODE
     Serial.printf("MOTION SENSOR OFFSET SAVED : Acceleration X = %i\tY = %i\tZ = %i | ",
                   values[0], values[1], values[2]);
     Serial.printf("Gyroscope X = %i\tY = %i\tZ = %i\n", values[3], values[4], values[5]);
@@ -112,7 +109,7 @@ class MotionSensorOffsets : public sensesp::StringTransform {
     gyro_offset.y = config["gy_offset"];
     gyro_offset.z = config["gz_offset"];
 
-    #ifdef DEBUG_MODE_CUSTOM_CLASSES_H
+    #ifdef DEBUG_MODE
     Serial.printf("MOTION SENSOR OFFSET FROM JSON : Acceleration X = %i\tY = %i\tZ = %i | ",
                   accel_offset.x, accel_offset.y, accel_offset.z);
     Serial.printf("Gyroscope X = %i\tY = %i\tZ = %i\n", gyro_offset.x, gyro_offset.y, gyro_offset.z);
@@ -135,6 +132,21 @@ class MotionSensorOffsets : public sensesp::StringTransform {
     return gyro_offset;
   }
 
+  // Return the configuration schema
+  inline const String get_default_config_schema() const {
+    return R"({
+      "type": "object",
+      "properties": {
+          "ax_offset": { "title": "Accel X Offset", "type": "number" },
+          "ay_offset": { "title": "Accel Y Offset", "type": "number" },
+          "az_offset": { "title": "Accel Z Offset", "type": "number" },
+          "gx_offset": { "title": "Gyro X Offset", "type": "number" },
+          "gy_offset": { "title": "Gyro Y Offset", "type": "number" },
+          "gz_offset": { "title": "Gyro Z Offset", "type": "number" }
+      }
+    })";
+  }
+
   private:
   JsonDocument jdoc_conf_motionsensor;
   JsonObject conf_motionsensor;                                 // MPU X/Y/Z offsets values if exists
@@ -144,9 +156,7 @@ class MotionSensorOffsets : public sensesp::StringTransform {
 };
 
 void setupMotionSensor(ConfigSensESP*);
-//namespace sensesp {
-//bool ConfigRequiresRestart(const MotionSensorOffsets& obj);
-//const String ConfigSchema(const MotionSensorOffsets& obj);
-//}
+bool ConfigRequiresRestart(const MotionSensorOffsets& obj);
+const String ConfigSchema(const MotionSensorOffsets& obj);
 
 #endif // MOTION_SENSOR_H
