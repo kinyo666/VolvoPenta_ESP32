@@ -127,13 +127,13 @@ class ConfigSensESP : public sensesp::SensorConfig {
         "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
         "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
         "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
+        "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "- INA3221 Rudder Angle Feature" },
         "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
         "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
         "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
         "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },        
         "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
-        "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
-        "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
+        "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" }
       }
     })";
   }
@@ -149,8 +149,9 @@ class ConfigSensESP : public sensesp::SensorConfig {
   const char* sensor_keys[17] = {
         "DS18B20_FEATURE", "DS18B20_BABORD_0", "DS18B20_TRIBORD_1", "DS18B20_COMMON_2",
         "INA3221_FEATURE", "INA3221_BABORD_0", "INA3221_CUVES_1", "INA3221_TRIBORD_2",
-        "INA3221_OTHERS_3", "INA3221_POWERDOWN", "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
-        "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE", "RUDDER_ANGLE_FEATURE"
+        "INA3221_OTHERS_3", "INA3221_POWERDOWN", "RUDDER_ANGLE_FEATURE",
+        "PC817_FEATURE", "PC817_BABORD", "PC817_TRIBORD",
+        "CHAIN_COUNTER_FEATURE", "MOTION_SENSOR_FEATURE", "MOTION_SENSOR_CALIBRATE" 
   };
 };
 

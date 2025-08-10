@@ -6,8 +6,8 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.18
-  @date 04/08/2025
+  @version 1.0.19
+  @date 06/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "customClasses.h"
@@ -37,13 +37,13 @@ const String ConfigSchema(const ConfigSensESP& obj) {
       "INA3221_TRIBORD_2": { "type": "boolean", "title": "- INA3221 Tribord" },
       "INA3221_OTHERS_3": { "type": "boolean", "title": "- INA3221 Autres" },
       "INA3221_POWERDOWN": { "type": "boolean", "title": "- INA3221 Power Down" },
+      "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "- INA3221 Rudder Angle Feature" },
       "PC817_FEATURE": { "type": "boolean", "title": "PC817 Feature" },
       "PC817_BABORD": { "type": "boolean", "title": "- PC817 Babord" },
       "PC817_TRIBORD": { "type": "boolean", "title": "- PC817 Tribord" },
       "CHAIN_COUNTER_FEATURE": { "type": "boolean", "title": "ADS1115 Chain Counter Feature" },
-      "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "Motion Sensor Feature" },
-      "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "Calibrate Motion Sensor" },
-      "RUDDER_ANGLE_FEATURE": { "type": "boolean", "title": "Rudder Angle Feature" }
+      "MOTION_SENSOR_FEATURE": { "type": "boolean", "title": "MPU6050 Motion Sensor Feature" },
+      "MOTION_SENSOR_CALIBRATE": { "type": "boolean", "title": "MPU6050 Calibrate Motion Sensor" }
     }
   })";
 }
