@@ -34,7 +34,7 @@ class MotionSensorOffsets : public sensesp::StringTransform {
   MotionSensorOffsets(const String& config_path = "")
      : sensesp::StringTransform(config_path) {
       conf_motionsensor = jdoc_conf_motionsensor.to<JsonObject>();
-      valid_offset = this->load(); //StringTransform::load();
+      valid_offset = this->load();
   }
 
   inline void set(const String input) {
