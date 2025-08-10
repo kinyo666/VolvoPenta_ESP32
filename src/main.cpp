@@ -21,11 +21,11 @@
 
   @author kinyo666
   @version 1.0.20
-  @date 06/08/2025
+  @date 10/08/2025
   @ref SensESP v3.1.0
+  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 
   Technical documentation :
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
   @link SensESP Documentation : https://signalk.org/SensESP/
   @link https://www.arduino.cc/reference/en/libraries/ina3221/
   @link https://signalk.org/specification/1.7.0/schemas/definitions.json
