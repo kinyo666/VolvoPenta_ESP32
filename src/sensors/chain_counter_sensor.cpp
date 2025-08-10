@@ -1,22 +1,24 @@
 /*
   Chain counter sensor for windlass :
   - Count how many meters of chain are deployed or retrieved
-  - Use a gypsy inductive sensor to count the number of revolutions
+  - Use a gypsy reed sensor to count the number of revolutions
   - Use a Persistent Integrator to accumulate the number of revolutions
   - Use a HSTS016L current sensor to determine the direction of the windlass
-  - Use an ADS1115 sensor to read the gypsy inductive sensor and the current sensor
+  - Use an ADS1115 sensor to read the gypsy reed sensor and the current sensor
+  - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.19
-  @date 04/08/2025
+  @version 1.0.20
+  @date 10/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "chain_counter_sensor.h"
 
 // Windlass sensor
 ADS1115 *sensor_ADS1115;                                      // ADS1115 sensor for windlass motor
-sensesp::Transform<int, int> *sensor_windlass_debounce;                // Windlass sensor (DigitalInputCounter + Debounce)
+sensesp::FloatTransform *sensor_windlass_debounce;            // Windlass sensor (DigitalInputCounter + Debounce)
 PersistentIntegrator *chain_counter;                          // Windlass chain counter
+JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
 unsigned int chain_counter_timer = 0;                         // Timer to save chain counter value
 boolean chain_counter_saved = true;                           // Trigger to save chain counter new value
@@ -34,26 +36,42 @@ auto chainCounterToString = [](float input) -> String {
   return chainCounterString;
 };
 
+// Config scheme for the UI
 const String ConfigSchema(const PersistentIntegrator& obj) {
 return R"({
   "type": "object",
   "properties": {
       "k": { "title": "Gypsy circumference", "type": "number" },
       "value": { "title": "Value", "type": "number" },
-      "threshold": { "title": "Threshold", "type": "number" }
+      "threshold": { "title": "Threshold", "type": "number" },
+      "windlass_delay": { "title": "Windlass delay", "type": "number", "default": 500, 
+          "description": "Delay in milliseconds for windlass current sensor" },
+      "gypsy_delay": { "title": "Gypsy delay", "type": "number", "default": 500, 
+          "description": "Delay in milliseconds for gypsy sensor. Must be higher than Debounce delay." }
   }
 })";
 }
 
+// If you change the configuration, the ESP32 must be restarted
 bool ConfigRequiresRestart(const PersistentIntegrator& obj) {
   return true;
 }
 
-// Read the value from the ADS1115 sensor (A0 or A1 input pin)
-uint16_t readValue(uint8_t input_mux) {
-	sensor_ADS1115->setMultiplexer(input_mux);
-	sensor_ADS1115->startSingleConvertion();
+// Convert raw values from ADS1115 to voltage (V) and current (A)
+float convertADSToVoltage(float raw) {
+    const float vRef = 1.65f;             // Voltage reference
+    const float adcRes = 4096.0f;         // ADC resolution
 
+    if (raw < 0) return 0.0f;
+
+    return ((raw / 2 * vRef) / adcRes);   // Single-ended must be divided by 2
+}
+
+// Read the value from the ADS1115 sensor (A0 or A2 input pin)
+float readValue(uint8_t input_mux) {
+	sensor_ADS1115->setMultiplexer(input_mux);
+  delay(2);
+	sensor_ADS1115->startSingleConvertion();
 	delayMicroseconds(25); // The ADS1115 needs to wake up from sleep mode and usually it takes 25 uS to do that
 
 	while (sensor_ADS1115->getOperationalStatus() == 0);
@@ -61,7 +79,7 @@ uint16_t readValue(uint8_t input_mux) {
 	return sensor_ADS1115->readConvertedValue();
 }
 
-/* Callbacks for Windlass UP/DOWN buttons sensor
+/* Callback for Windlass UP/DOWN buttons sensor
    This function determines :
    - In which direction the windlass turns (UP or DOWN)
    - Whether the last value should be saved (persistent storage)
@@ -77,7 +95,7 @@ uint16_t readValue(uint8_t input_mux) {
    To avoid infinite increment of the timer when there is no UP/DOWN event and multiples saves, the timer is set to 0 
    when the last value has already been saved.
 
-   NOTE(1) : If the global read_delay_windlass is set to more or less than one second, the number of cycles before saving SHOULD be modified
+   NOTE(1) : If the read_delay_windlass value is set to more or less than one second, the number of cycles before saving SHOULD be modified
    NOTE(2) : A cycle is defined as one revolution of the gypsy, so the read_delay_windlass MUST have a lower value than the revolution time
    NOTE(3) : DOWN = chain_counter + gypsy_circum (addition) ; UP = chain_counter - gypsy_circum (substraction)
 
@@ -87,6 +105,8 @@ float readValueADS1115_A0_A1() {
   float direction = conf_windlass["k"].as<float>();
   float threshold = conf_windlass["threshold"].as<float>();
   float up = readValue(ADS1115_MUX_AIN0_AIN1);
+  float up_volt = convertADSToVoltage(up);
+  float up_amp = up_volt / ADS1115_SENSITIVITY; // Convert voltage to current (A) using the gain of the current sensor
 
   if (up > threshold) {                                                                     // Windlass IDLE/DOWN -> UP
     windlass_state = WINDLASS_UP;                                                           // Set the windlass state to UP    
@@ -95,7 +115,7 @@ float readValueADS1115_A0_A1() {
       chain_counter->set_direction(conf_windlass["k"]);                                     // Set the new config direction
     }
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : UP -> up = %f \t| direction = %f\n", up, conf_windlass["k"].as<float>());
+    Serial.printf("WINDLASS : UP -> up = %.2f (%.2fV %.2fA) \t| direction = %f\n", up, up_volt, up_amp, conf_windlass["k"].as<float>());
     #endif
   }
   else if ((windlass_state == WINDLASS_DOWN) && (up <= threshold)) {                         // Windlass IDLE/UP -> DOWN
@@ -108,7 +128,7 @@ float readValueADS1115_A0_A1() {
       windlass_state = WINDLASS_IDLE;                                                        // Return to the windlass state IDLE
 
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : DOWN -> up = %f \t| direction = %f | timer = %i | windlass_state = %s\n", up, 
+    Serial.printf("WINDLASS : DOWN -> up = %.2f \t| direction = %f | timer = %i | windlass_state = %s\n", up, 
                   conf_windlass["k"].as<float>(), chain_counter_timer, 
                   (windlass_state == WINDLASS_DOWN) ? "DOWN" : "IDLE");
     #endif
@@ -133,36 +153,37 @@ float readValueADS1115_A0_A1() {
       chain_counter->set_direction(conf_windlass["k"]);                                      // Set the new config direction
     }
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : IDLE -> up = %f \t| direction = %f | timer = %i | saved = %s\n", up, 
-                  conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
+    Serial.printf("WINDLASS : IDLE -> up = %.2f (%.2fV %.2fA) \t| direction = %f | timer = %i | saved = %s\n", up,
+                  up_volt, up_amp, conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
     #endif
   }
 
   return up;
 }
 
-// Callback for the gypsy inductive sensor
-// We use a 5 kΩ pull-up resistor on the ADS1115 A1 input pin to read the gypsy inductive sensor (~+3.3V = open, 0 = closed)
+// Callback for the gypsy's reed sensor
+// Use a 10 kΩ pull-up resistor on the ADS1115 A2 input pin to read the reed sensor (~+3.3V = open, 0 = closed)
 float readValueADS1115_A2() {
   float gypsy = readValue(ADS1115_MUX_AIN2_GND);
-  // If the windlass is in open state, we ignore the values between 6800 and 7200
+  // If the reed sensor state is open and PGA is set to 4.096, we ignore the values between 6800 and 7200
   if ((gypsy >= 6800) && (gypsy <= 7200))
     gypsy = -1.0;
+
   return gypsy;
 }
 
 // Callback for chain counter
 // This function is called after each sensor_windlass value changes (after debounce)
 void handleChainCounterChange() {
-  int value = sensor_windlass_debounce->get();  // Get the current value from the debounced sensor
-  if (value == 0) {
-    chain_counter_saved = false;                // Set the last value status to 'not saved'
-    chain_counter_timer = 0;                    // Arm a timer to save chain counter last value after CHAIN_COUNTER_SAVE_TIMER cycles
+  float value = sensor_windlass_debounce->get();  // Get the current value from the debounced sensor
+  if (value == 0.0) {
+    chain_counter_saved = false;                  // Set the last value status to 'not saved'
+    chain_counter_timer = 0;                      // Arm a timer to save chain counter last value after CHAIN_COUNTER_SAVE_TIMER cycles
     if (windlass_state == WINDLASS_IDLE) 
-      windlass_state = WINDLASS_DOWN;           // Set the windlass state to DOWN if it was IDLE (gypsy freewheel) 
+      windlass_state = WINDLASS_DOWN;             // Set the windlass state to DOWN if it was IDLE (gypsy freewheel) 
 
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : NEW VALUE TO SAVE = %i | windlass_state = %s\n", value, 
+    Serial.printf("WINDLASS : NEW VALUE TO SAVE = %f | windlass_state = %s\n", value, 
                   (windlass_state == WINDLASS_UP) ? "UP" : ((windlass_state == WINDLASS_DOWN) ? "DOWN" : "IDLE"));
     #endif
   }
@@ -172,12 +193,12 @@ void handleChainCounterChange() {
 bool isADS1115Present(uint8_t i2c_addr) {
   Wire.beginTransmission(i2c_addr);
   uint8_t error = Wire.endTransmission();
-  return (error == 0); // 0 = périphérique présent
+  return (error == 0); // 0 = sensor is present
 }
 
 /* Setup the ADS1115 sensor for windlass chain counter
-   The ADS1115 returns a value between 0 and 32767. We set PGA to 2.048V so when the ADS1115 reads a value :
-   - on the A1 pin (+3,3V), it returns a deterministic max value equals to 38 (out of PGA range) or 0 if the reed sensor is closed (gypsy signal)
+   The ADS1115 returns a value between 0 and 32767. We set PGA to 4.096V so when the ADS1115 reads a value :
+   - on the A1 pin (+3,3V), it returns a deterministic max value equals to 8190 or 0 if the reed sensor is closed (gypsy signal)
    - on the A0 pin (+/- 1,65V), it returns a value > 26400 if the HSTS016L Hall effect sensor measures a current (UP signal) 
                                 or <= 26400 if the windlass is not running in UP direction
    If you want to use a higher PGA (i.e 4,096V), you MUST :
@@ -205,6 +226,8 @@ bool isADS1115Present(uint8_t i2c_addr) {
   float voltage = (sensorValue * vRef) / adcResolution; // Convert ADC value to voltage
   float current = voltage / sensitivity; // Calculate current in amperes
 
+  NOTE : Both RepeatSensor have configurable delays from PersistentIntegrator object
+
   @returns bool - true if the ADS1115 sensor is initialized, false if not
   @see https://forum.dronebotworkshop.com/electronic-components/help-with-high-current-hall-effect-sensor-hsts016l/
 */
@@ -221,7 +244,7 @@ bool setupADS1115Sensor() {
   // Check if the ADS1115 sensor is present
   if (!isADS1115Present(ADS1115_WINDLASS_ADDR)) {
     #ifdef DEBUG_MODE
-    Serial.println("ADS1115 sensor NOT FOUND at address " + String(ADS1115_WINDLASS_ADDR, HEX));
+    Serial.println("ADS1115 : Sensor NOT FOUND at address " + String(ADS1115_WINDLASS_ADDR, HEX));
     #endif
     return false; // Exit if the sensor is not present
   }
@@ -229,11 +252,14 @@ bool setupADS1115Sensor() {
     // Initialize the ADS1115 sensor
     sensor_ADS1115 = new ADS1115(ADS1115_WINDLASS_ADDR);
     sensor_ADS1115->reset();
+    delayMicroseconds(50);                                        // Wait for the ADS1115 to reset
     sensor_ADS1115->setDeviceMode(ADS1115_MODE_SINGLE);
-    sensor_ADS1115->setDataRate(ADS1115_DR_128_SPS);
-    sensor_ADS1115->setPga(ADS1115_PGA_4_096); // Set PGA to 2.048V ADS1115_PGA_2_048 (default) 1 bit = 1mV @see https://forums.adafruit.com/viewtopic.php?t=186225
+    sensor_ADS1115->setDataRate(ADS1115_DR_128_SPS);              // ADS1115_DR_128_SPS
+    sensor_ADS1115->setPga(ADS1115_PGA_4_096);                    // Set PGA to 4.096V 1 bit = 2mV @see https://forums.adafruit.com/viewtopic.php?t=186225
+    sensor_ADS1115->setLatching(false);                           // Non-latching
+    sensor_ADS1115->setComparatorQueue(ADS1115_COMP_QUE_DISABLE); // Disable comparator    
     #ifdef DEBUG_MODE
-    Serial.println("ADS1115 sensor found at address " + String(ADS1115_WINDLASS_ADDR, HEX));
+    Serial.println("ADS1115 : Sensor found at address " + String(ADS1115_WINDLASS_ADDR, HEX));
     #endif
     return true;
   }
@@ -243,35 +269,39 @@ bool setupADS1115Sensor() {
 void setupWindlassSensor() {
   if (!setupADS1115Sensor()) {
     #ifdef DEBUG_MODE
-    Serial.println("Failed to initialize ADS1115 sensor. Windlass sensor setup aborted.");
+    Serial.println("ADS1115 : Failed to initialize sensor. Windlass sensor setup aborted.");
     #endif
     return; // Exit if the ADS1115 sensor is not initialized
   }
-
-  sensesp::RepeatSensor<float> *sensor_windlass_A0 = new sensesp::RepeatSensor<float>(read_delay_windlass, 
-                                                                 readValueADS1115_A0_A1);           // Read the A0-A1 value (windlass) from the ADS1115 sensor
-  JsonDocument jdoc_conf_windlass;
+  // Initialize the persistent chain counter
   conf_windlass = jdoc_conf_windlass.to<JsonObject>();                                               // Store Windlass configuration
-  conf_windlass["k"] = gipsy_circum;                                                                 // Default direction = DOWN
+  conf_windlass["k"] = gypsy_circum;                                                                 // Default direction = DOWN
   conf_windlass["threshold"] = ADS1115_WINDLASS_THRESHOLD;                                           // Default threshold = 26400
-  chain_counter = new PersistentIntegrator(gipsy_circum, 0.0, ADS1115_WINDLASS_THRESHOLD,
+  chain_counter = new PersistentIntegrator(gypsy_circum, 0.0, ADS1115_WINDLASS_THRESHOLD,
                                             conf_path_chain[CHAIN_COUNTER_PATH]);                    // Chain counter in meter
   chain_counter->to_json(conf_windlass);                                                             // Retrieve last saved value if exists
-  delay(10);                                                                                         // Wait to avoid RepeatSensor synchronisation issues
-  sensesp::RepeatSensor<float> *sensor_gypsy_A1 = new sensesp::RepeatSensor<float>(read_delay_windlass, 
-                                                                    readValueADS1115_A2);           // Read the A2 value (gypsy) with a delay
-  sensesp::DebounceInt *chain_debounce = new sensesp::DebounceInt(CHAIN_COUNTER_IGNORE_DELAY, conf_path_chain[CHAIN_COUNTER_DELAY]);
+
+  // Initialize the windlass sensor
+  sensesp::RepeatSensor<float> *sensor_windlass_A0 = new sensesp::RepeatSensor<float>(chain_counter->get_windlass_delay(), 
+                                                                 readValueADS1115_A0_A1);            // Read the A0-A1 value (windlass) from the ADS1115 sensor
+  delay(50);                                                                                         // Wait to avoid RepeatSensor synchronisation issues
+
+  // Initialize the gypsy sensor
+  sensesp::RepeatSensor<float> *sensor_gypsy_A1 = new sensesp::RepeatSensor<float>(chain_counter->get_gypsy_delay(), 
+                                                                    readValueADS1115_A2);            // Read the A2 value (gypsy) with a delay
+  sensesp::DebounceFloat *chain_debounce = new sensesp::DebounceFloat(CHAIN_COUNTER_DELAY_DEBOUNCE, 
+                                                          conf_path_chain[CHAIN_COUNTER_PATH_DEBOUNCE]);
   sensor_windlass_debounce = sensor_gypsy_A1->connect_to(chain_debounce);                            // Avoid multiples counts
-  auto *sensor_windlass_counter = sensor_windlass_debounce->connect_to(chain_counter);               // Add +/- gipsy_circum to the counter
+  auto *sensor_windlass_counter = sensor_windlass_debounce->connect_to(chain_counter);               // Add +/- gypsy_circum to the counter
   sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
     ->connect_to(new sensesp::SKOutputFloat(sk_path_windlass, 
-                new sensesp::SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));                  // Output the last float value to SignalK
+                new sensesp::SKMetadata("m", "Compteur Chaine", "Chain Counter", "Mètre")));         // Output the last float value to SignalK
 
   sensesp::LambdaTransform<float, String> *sensor_windlass_string = new sensesp::LambdaTransform<float, String>(chainCounterToString);
   sensor_windlass_counter
     ->connect_to(sensor_windlass_string)
-    ->connect_to(new sensesp::SKOutputString(sk_path_windlass + ".direction"));                               // Output the last value + direction to SignalK
+    ->connect_to(new sensesp::SKOutputString(sk_path_windlass + ".direction"));                      // Output the last value + direction to SignalK
 
   /* Set SensESP Configuration UI for chain_counter and chain_debounce
      If you want something to appear in the web UI, you first define overloaded ConfigSchema and ConfigRequiresRestart functions for that class.
@@ -290,6 +320,5 @@ void setupWindlassSensor() {
   #ifdef DEBUG_MODE
   sensor_windlass_debounce->connect_to(new sensesp::SKOutputInt(sk_path_windlass + ".debounce.raw"));
   sensor_windlass_A0->connect_to(new sensesp::SKOutputFloat(sk_path_windlass + ".up.raw"));
-  //sensor_gypsy_A1->connect_to(new SKOutputInt(sk_path_windlass + ".raw"));
   #endif
 }
