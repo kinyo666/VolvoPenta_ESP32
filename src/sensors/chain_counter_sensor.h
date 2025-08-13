@@ -8,14 +8,13 @@
   - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.20
-  @date 10/08/2025
+  @version 1.0.21
+  @date 14/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #ifndef CHAIN_COUNTER_SENSOR_H
 #define CHAIN_COUNTER_SENSOR_H
 
-//#include <sensesp.h>
 #include <ADS1115-Driver.h>
 #include <sensesp/sensors/sensor.h>
 #include <sensesp/transforms/transform.h>
@@ -33,14 +32,58 @@
 #define CHAIN_COUNTER_DELAY_WINDLASS 500
 #define CHAIN_COUNTER_NB 2
 #define CHAIN_COUNTER_UI_CYCLE 1                          // Number of cycles to wait before refreshing the UI symbol direction to IDLE
-#define ADS1115_WINDLASS_ADDR ADS1115_I2C_ADDR_VDD        // I2C address = 0x49 VDD
+
+// ADS1115 configuration
+#define ADS1115_WINDLASS_ADDR ADS1115_I2C_ADDR_GND        // I2C address = 0x48 GND (<-- change here if needed)
 #define ADS1115_WINDLASS_THRESHOLD 26400                  // Windlass threshold (depending on the HSTS016L sensor model and PGA used)
-#define ADS1115_SENSITIVITY 0.0165                        // Sensitivity of the HSTS016L current sensor
+#define ADS1115_PGA_6_144_RES      0.1875
+#define ADS1115_PGA_4_096_RES      0.125
+#define ADS1115_PGA_2_048_RES      0.0625                 // Fix for ADS1115 lib
+#define ADS1115_PGA_1_024_RES      0.03125
+#define ADS1115_PGA_0_512_RES      0.015625
+#define ADS1115_PGA_0_256_RES      0.0078125
+
+// HSTS016L characteristics
+#define HSTS016L_VREF               1.65f                 // Reference voltage Vref = +1.65V ; Vout = Vref ±0.625V
+#define HSTS016L_SENSITIVITY        0.003125f             // Sensitivity V/A = 0.625V / 200A = 3.125 mV/A
 
 const String sk_path_windlass = "navigation.anchor.rodeDeployed";
 const String conf_path_chain[CHAIN_COUNTER_NB] = {  "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
 const float gypsy_circum = 0.43982;                       // Windlass gypsy circumference (meter) - r = 85 mm ; c = 0.534071 m
 const unsigned int read_delay_windlass = 500;             // Windlass read delay = 0.5s
+
+class ADS1115Sensor : public ADS1115 {
+  public:
+  ADS1115Sensor(i2c_addr_t i2cSlaveAddr = ADS1115_WINDLASS_ADDR) : ADS1115(i2cSlaveAddr) {
+
+    reset();
+    delayMicroseconds(50);                                        // Wait for the ADS1115 to reset
+    setDeviceMode(ADS1115_MODE_SINGLE);                     // Single conversion
+    setDataRate(ADS1115_DR_128_SPS);                        // ADS1115_DR_128_SPS
+    setPga(ADS1115_PGA_4_096);                              // Set PGA to 4.096V 1 bit = 2mV @see https://forums.adafruit.com/viewtopic.php?t=186225
+    setLatching(false);                                     // Non-latching
+    setComparatorQueue(ADS1115_COMP_QUE_DISABLE);           // Disable comparator
+  }
+  
+  inline int16_t readRegister(reg_addr_t dataAddress) {
+    Wire.beginTransmission((uint8_t) ADS1115_WINDLASS_ADDR);
+    Wire.write(dataAddress);
+    Wire.endTransmission();
+    Wire.requestFrom((uint8_t) ADS1115_WINDLASS_ADDR, (uint8_t) 2);
+
+    if (Wire.available()) {
+      uint8_t firstByte = Wire.read();
+      uint8_t secondByte = Wire.read();
+
+      return (firstByte << 8) + secondByte;
+    }
+    return -1;
+  }
+
+  inline int16_t readRawValue() {
+	  return readRegister(ADS1115_CONVERSION_REG_ADDR);
+  }
+};
 
 // Override Integrator class with persistent last value, gypsy_circum and A0 pin threshold configuration
 class PersistentIntegrator : public sensesp::FloatTransform {

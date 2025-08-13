@@ -8,15 +8,15 @@
   - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.20
-  @date 10/08/2025
+  @version 1.0.21
+  @date 14/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "chain_counter_sensor.h"
 
 // Windlass sensor
-ADS1115 *sensor_ADS1115;                                      // ADS1115 sensor for windlass motor
-sensesp::FloatTransform *sensor_windlass_debounce;            // Windlass sensor (DigitalInputCounter + Debounce)
+ADS1115Sensor *sensor_ADS1115;                                // ADS1115 sensor for windlass motor
+sensesp::FloatTransform *sensor_windlass_debounce;            // Windlass sensor (Debounce)
 PersistentIntegrator *chain_counter;                          // Windlass chain counter
 JsonDocument jdoc_conf_windlass;
 JsonObject conf_windlass;                                     // Windlass direction of rotation (UP or DOWN) and last value if exists
@@ -57,26 +57,70 @@ bool ConfigRequiresRestart(const PersistentIntegrator& obj) {
   return true;
 }
 
-// Convert raw values from ADS1115 to voltage (V) and current (A)
-float convertADSToVoltage(float raw) {
-    const float vRef = 1.65f;             // Voltage reference
-    const float adcRes = 4096.0f;         // ADC resolution
+// Convert raw values from ADS1115 to voltage (V)
+float convertValueToVoltage(int16_t rawValue, uint8_t currentPGA) {
+	float multiplier;     // Voltage resolution mV/bit
 
-    if (raw < 0) return 0.0f;
+	switch (currentPGA) {
+		case ADS1115_PGA_0_256:
+			multiplier = ADS1115_PGA_0_256_RES;
+			break;
+		case ADS1115_PGA_0_512:
+			multiplier = ADS1115_PGA_0_512_RES;
+			break;
+		case ADS1115_PGA_1_024:
+			multiplier = ADS1115_PGA_1_024_RES;
+			break;
+		case ADS1115_PGA_2_048:
+			multiplier = ADS1115_PGA_2_048_RES;
+			break;
+		case ADS1115_PGA_4_096:
+			multiplier = ADS1115_PGA_4_096_RES;
+			break;
+		case ADS1115_PGA_6_144:
+			multiplier = ADS1115_PGA_6_144_RES;
+			break;
+		default:
+			multiplier = 1.0;
+			break;
+	}
 
-    return ((raw / 2 * vRef) / adcRes);   // Single-ended must be divided by 2
+	return (multiplier * rawValue) / 1000;  // Returns voltage in volts
 }
 
-// Read the value from the ADS1115 sensor (A0 or A2 input pin)
-float readValue(uint8_t input_mux) {
+// Convert voltage (V) to current (A)
+float convertVoltageToAmperes(float voltage) {
+    // Voltage is relative to Vref
+    float vDiff = (voltage > 0) ? voltage - HSTS016L_VREF : 0.0f; // If Vout - Vref is negative, amperes = 0.0
+    // Convert to amperes using sensitivity
+    return vDiff / HSTS016L_SENSITIVITY;
+}
+
+// Read the value from the ADS1115 sensor (A0-A1 or A2 input pin)
+int16_t readValue(uint8_t input_mux) {
+  uint8_t input_pga; // = (input_mux == ADS1115_MUX_AIN2_GND) ? ADS1115_PGA_4_096 : ADS1115_PGA_2_048; // Set PGA depending on the input pin
+  switch (input_mux) {
+    case ADS1115_MUX_AIN0_AIN1 :
+      input_pga = ADS1115_PGA_1_024;    // Use PGA 1.024V for A0-A1 differential ±0.625V
+      break;
+    case ADS1115_MUX_AIN2_GND :
+      input_pga = ADS1115_PGA_4_096;    // A2 reed switch is +0.0V (GND) or +3.3V (VCC)
+      break;      
+    case ADS1115_MUX_AIN0_GND :
+    case ADS1115_MUX_AIN1_GND :
+    default :
+      input_pga = ADS1115_PGA_2_048;    // Use PGA 2.048V for A1 and A0 single-ended inputs (~1.65V)
+      break;
+  }
+
 	sensor_ADS1115->setMultiplexer(input_mux);
-  delay(2);
+  sensor_ADS1115->setPga(input_pga);  
 	sensor_ADS1115->startSingleConvertion();
 	delayMicroseconds(25); // The ADS1115 needs to wake up from sleep mode and usually it takes 25 uS to do that
 
 	while (sensor_ADS1115->getOperationalStatus() == 0);
 
-	return sensor_ADS1115->readConvertedValue();
+	return sensor_ADS1115->readRawValue(); // Read the raw value from the ADS1115 sensor
 }
 
 /* Callback for Windlass UP/DOWN buttons sensor
@@ -104,9 +148,12 @@ float readValue(uint8_t input_mux) {
 float readValueADS1115_A0_A1() { 
   float direction = conf_windlass["k"].as<float>();
   float threshold = conf_windlass["threshold"].as<float>();
-  float up = readValue(ADS1115_MUX_AIN0_AIN1);
-  float up_volt = convertADSToVoltage(up);
-  float up_amp = up_volt / ADS1115_SENSITIVITY; // Convert voltage to current (A) using the gain of the current sensor
+  int16_t up = readValue(ADS1115_MUX_AIN0_AIN1);
+  float up_volt = convertValueToVoltage(up, ADS1115_PGA_1_024);
+  float up_amp = convertVoltageToAmperes(up_volt); // Convert voltage to current (A) using the gain of the current sensor
+
+  int16_t a0 = readValue(ADS1115_MUX_AIN0_GND); // Read the A0 pin (windlass current)
+  int16_t a1 = readValue(ADS1115_MUX_AIN1_GND); // Read the A1 pin (gypsy current)
 
   if (up > threshold) {                                                                     // Windlass IDLE/DOWN -> UP
     windlass_state = WINDLASS_UP;                                                           // Set the windlass state to UP    
@@ -115,7 +162,7 @@ float readValueADS1115_A0_A1() {
       chain_counter->set_direction(conf_windlass["k"]);                                     // Set the new config direction
     }
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : UP -> up = %.2f (%.2fV %.2fA) \t| direction = %f\n", up, up_volt, up_amp, conf_windlass["k"].as<float>());
+    Serial.printf("WINDLASS : UP -> up = %.2f (%.3fV %.3fA) \t| direction = %f\n", up, up_volt, up_amp, conf_windlass["k"].as<float>());
     #endif
   }
   else if ((windlass_state == WINDLASS_DOWN) && (up <= threshold)) {                         // Windlass IDLE/UP -> DOWN
@@ -153,23 +200,31 @@ float readValueADS1115_A0_A1() {
       chain_counter->set_direction(conf_windlass["k"]);                                      // Set the new config direction
     }
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : IDLE -> up = %.2f (%.2fV %.2fA) \t| direction = %f | timer = %i | saved = %s\n", up,
-                  up_volt, up_amp, conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
+    //Serial.printf("WINDLASS : IDLE -> up = %.2f (%.2fV %.2fA) \t| direction = %f | timer = %i | saved = %s\n", up,
+    //              up_volt, up_amp, conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
     #endif
   }
 
-  return up;
+  float a1_volt = convertValueToVoltage(a1, ADS1115_PGA_2_048);
+  float a0_volt = convertValueToVoltage(a0, ADS1115_PGA_2_048);
+  Serial.printf("WINDLASS : A0-A1 = %d (%.3fV %.3fA)\t A0 = %d (%.3fV %.3fA)\t A1 = %d (%.3fV %.3fA)\n",
+                                up, up_volt, up_amp,
+                                a0, a0_volt, convertVoltageToAmperes(a0_volt),
+                                a1, a1_volt, convertVoltageToAmperes(a1_volt));
+
+  return ((float) up);
 }
 
 // Callback for the gypsy's reed sensor
 // Use a 10 kΩ pull-up resistor on the ADS1115 A2 input pin to read the reed sensor (~+3.3V = open, 0 = closed)
 float readValueADS1115_A2() {
-  float gypsy = readValue(ADS1115_MUX_AIN2_GND);
+  int16_t gypsy = readValue(ADS1115_MUX_AIN2_GND);
+  Serial.printf("WINDLASS : A2 = %.2f\n", gypsy);
   // If the reed sensor state is open and PGA is set to 4.096, we ignore the values between 6800 and 7200
   if ((gypsy >= 6800) && (gypsy <= 7200))
     gypsy = -1.0;
 
-  return gypsy;
+  return ((float) gypsy);
 }
 
 // Callback for chain counter
@@ -197,34 +252,28 @@ bool isADS1115Present(uint8_t i2c_addr) {
 }
 
 /* Setup the ADS1115 sensor for windlass chain counter
-   The ADS1115 returns a value between 0 and 32767. We set PGA to 4.096V so when the ADS1115 reads a value :
-   - on the A1 pin (+3,3V), it returns a deterministic max value equals to 8190 or 0 if the reed sensor is closed (gypsy signal)
-   - on the A0 pin (+/- 1,65V), it returns a value > 26400 if the HSTS016L Hall effect sensor measures a current (UP signal) 
+   The ADS1115 returns a value between 0 and 32767. We set dynamic PGA from 1.024V to 4.096V so when the ADS1115 reads a value :
+   - on the A2 pin (+3.3V), it returns a deterministic max value equals to 0 or 26400 if the reed sensor is closed (gypsy signal)
+   - on the A0 pin (±1.65V), it returns a value > 26400 if the HSTS016L Hall effect sensor measures a current (UP signal) 
                                 or <= 26400 if the windlass is not running in UP direction
    If you want to use a higher PGA (i.e 4,096V), you MUST :
    - change the ADS1115_WINDLASS_THRESHOLD value
-   - use a LambdaTransform to ignore the range of nominal values (+3,3V) before the DebounceInt sensor
+   - use a LambdaTransform to ignore the range of nominal values (+3.3V) before the DebounceInt sensor
 
    ADS1115 Formula : pin_value = pin_volt / PGA_volt * 32768
    HSTS016L Formula : volt_HSTS = 1.65V +（(I / Ipn）* 0.625V) (I = current measured and Ipn = 200A, depending on your HSTS016L model)
-   HSTS_voltage = (pin_value * 3.3) / 2048; // Convert ADC value to voltage
-   HSTS_current = HSTS_voltage / 0.0165; // Calculate current in amperes
-    
+   HSTS_voltage = pin_value * ADS1115_PGA_X_XXX_RES
+   HSTS_current = HSTS_voltage / HSTS_sensitivity
+
    Example 1 : I = 50A (HSTS016L current)
-    volt_HSTS = 1.65V + ((50 / 200) * 0.625V) = 1.65V + 0.15625V = 1.80625V
-    A0_pin_value = (1.80625 / 2.048) * 32768 = 28900
+    Vout = 1.65V + ((50 / 200) * 0.625V) = 1.65V + 0.15625V = 1.80625V
+    A0_raw_value = (1.80625 / 2.048) * 32768 = 28900
 
    Example 2 : I = 0A (HSTS016L current)
-    volt_HSTS = 1.65V + (0 / 200) * 0.625V = 1.65V + 0.0V = 1.65V
-    A0_pin_value = (1.65 / 2.048) * 32768 = 26400
+    Vout = 1.65V + (0 / 200) * 0.625V = 1.65V + 0.0V = 1.65V
+    A0_raw_value = (1.65 / 2.048) * 32768 = 26400
 
-  Now 0.625V (625mV) change from 1.65V is equivalent to 200A, implying a scale of 625 (mV) / 200(A) = 3.08mV/A
-
-  const float sensitivity = 0.0165; // Sensitivity in volts per ampere (example: 0,25V*1% = 0.025V/A)
-  const float vRef = 3.3;    // Reference voltage of the ESP32 (3.3V) or Arduino (5V)
-  const int adcResolution = 32768; // ADC resolution (10-bit for Arduino UNO ; 15-bit for ADS1115 ; 12-bit for ESP32)
-  float voltage = (sensorValue * vRef) / adcResolution; // Convert ADC value to voltage
-  float current = voltage / sensitivity; // Calculate current in amperes
+  Now 0.625V (625mV) change from 1.65V is equivalent to 200A, implying a scale of 625 (mV) / 200(A) = 3.125 mV/A
 
   NOTE : Both RepeatSensor have configurable delays from PersistentIntegrator object
 
@@ -249,15 +298,9 @@ bool setupADS1115Sensor() {
     return false; // Exit if the sensor is not present
   }
   else {
-    // Initialize the ADS1115 sensor
-    sensor_ADS1115 = new ADS1115(ADS1115_WINDLASS_ADDR);
-    sensor_ADS1115->reset();
-    delayMicroseconds(50);                                        // Wait for the ADS1115 to reset
-    sensor_ADS1115->setDeviceMode(ADS1115_MODE_SINGLE);
-    sensor_ADS1115->setDataRate(ADS1115_DR_128_SPS);              // ADS1115_DR_128_SPS
-    sensor_ADS1115->setPga(ADS1115_PGA_4_096);                    // Set PGA to 4.096V 1 bit = 2mV @see https://forums.adafruit.com/viewtopic.php?t=186225
-    sensor_ADS1115->setLatching(false);                           // Non-latching
-    sensor_ADS1115->setComparatorQueue(ADS1115_COMP_QUE_DISABLE); // Disable comparator    
+    // Initialize the ADS1115 sensor 
+    sensor_ADS1115 = new ADS1115Sensor(ADS1115_WINDLASS_ADDR);
+
     #ifdef DEBUG_MODE
     Serial.println("ADS1115 : Sensor found at address " + String(ADS1115_WINDLASS_ADDR, HEX));
     #endif
@@ -282,7 +325,7 @@ void setupWindlassSensor() {
   chain_counter->to_json(conf_windlass);                                                             // Retrieve last saved value if exists
 
   // Initialize the windlass sensor
-  sensesp::RepeatSensor<float> *sensor_windlass_A0 = new sensesp::RepeatSensor<float>(chain_counter->get_windlass_delay(), 
+  sensesp::RepeatSensor<float> *sensor_windlass_A0 = new sensesp::RepeatSensor<float>(chain_counter->get_windlass_delay(),
                                                                  readValueADS1115_A0_A1);            // Read the A0-A1 value (windlass) from the ADS1115 sensor
   delay(50);                                                                                         // Wait to avoid RepeatSensor synchronisation issues
 
