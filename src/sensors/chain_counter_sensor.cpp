@@ -8,7 +8,7 @@
   - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.21
+  @version 1.0.22
   @date 14/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -42,10 +42,11 @@ return R"({
   "type": "object",
   "properties": {
       "k": { "title": "Gypsy circumference", "type": "number" },
-      "value": { "title": "Value", "type": "number" },
-      "threshold": { "title": "Threshold", "type": "number" },
+      "value": { "title": "Rode deployed", "type": "number" },
+      "windlass_threshold": { "title": "Windlass threshold", "type": "number" },
       "windlass_delay": { "title": "Windlass delay", "type": "number", "default": 500, 
           "description": "Delay in milliseconds for windlass current sensor" },
+      "gypsy_threshold" : { "title": "Gypsy threshold", "type": "number" },
       "gypsy_delay": { "title": "Gypsy delay", "type": "number", "default": 500, 
           "description": "Delay in milliseconds for gypsy sensor. Must be higher than Debounce delay." }
   }
@@ -57,8 +58,8 @@ bool ConfigRequiresRestart(const PersistentIntegrator& obj) {
   return true;
 }
 
-// Convert raw values from ADS1115 to voltage (V)
-float convertValueToVoltage(int16_t rawValue, uint8_t currentPGA) {
+// Convert raw values from ADS1115 to volts (V)
+float convertValueToVolts(int16_t rawValue, uint8_t currentPGA) {
 	float multiplier;     // Voltage resolution mV/bit
 
 	switch (currentPGA) {
@@ -89,7 +90,7 @@ float convertValueToVoltage(int16_t rawValue, uint8_t currentPGA) {
 }
 
 // Convert voltage (V) to current (A)
-float convertVoltageToAmperes(float voltage) {
+float convertVoltsToAmperes(float voltage) {
     // Voltage is relative to Vref
     float vDiff = (voltage > 0) ? voltage - HSTS016L_VREF : 0.0f; // If Vout - Vref is negative, amperes = 0.0
     // Convert to amperes using sensitivity
@@ -101,15 +102,15 @@ int16_t readValue(uint8_t input_mux) {
   uint8_t input_pga; // = (input_mux == ADS1115_MUX_AIN2_GND) ? ADS1115_PGA_4_096 : ADS1115_PGA_2_048; // Set PGA depending on the input pin
   switch (input_mux) {
     case ADS1115_MUX_AIN0_AIN1 :
-      input_pga = ADS1115_PGA_1_024;    // Use PGA 1.024V for A0-A1 differential ±0.625V
+      input_pga = ADS1115_PGA_1_024;    // Use PGA 1.024V for A0-A1 differential --> ±0.625V
       break;
     case ADS1115_MUX_AIN2_GND :
-      input_pga = ADS1115_PGA_4_096;    // A2 reed switch is +0.0V (GND) or +3.3V (VCC)
+      input_pga = ADS1115_PGA_4_096;    // Use PGA 4.096V for A2 reed switch --> +3.3V (VCC) or +0.0V (GND)
       break;      
     case ADS1115_MUX_AIN0_GND :
     case ADS1115_MUX_AIN1_GND :
     default :
-      input_pga = ADS1115_PGA_2_048;    // Use PGA 2.048V for A1 and A0 single-ended inputs (~1.65V)
+      input_pga = ADS1115_PGA_2_048;    // Use PGA 2.048V for A1 (Vref) and A0 (Vout) single-ended inputs --> ±1.65V
       break;
   }
 
@@ -147,25 +148,27 @@ int16_t readValue(uint8_t input_mux) {
 */
 float readValueADS1115_A0_A1() { 
   float direction = conf_windlass["k"].as<float>();
-  float threshold = conf_windlass["threshold"].as<float>();
+  int16_t windlass_threshold = conf_windlass["windlass_threshold"].as<int16_t>();
   int16_t up = readValue(ADS1115_MUX_AIN0_AIN1);
-  float up_volt = convertValueToVoltage(up, ADS1115_PGA_1_024);
-  float up_amp = convertVoltageToAmperes(up_volt); // Convert voltage to current (A) using the gain of the current sensor
+  float up_volt = convertValueToVolts(up, ADS1115_PGA_1_024);
+  float up_amp = convertVoltsToAmperes(up_volt); // Convert voltage to current (A) using the gain of the current sensor
 
+  #ifdef DEBUG_MODE
   int16_t a0 = readValue(ADS1115_MUX_AIN0_GND); // Read the A0 pin (windlass current)
   int16_t a1 = readValue(ADS1115_MUX_AIN1_GND); // Read the A1 pin (gypsy current)
+  #endif
 
-  if (up > threshold) {                                                                     // Windlass IDLE/DOWN -> UP
+  if (up > windlass_threshold) {                                                                     // Windlass IDLE/DOWN -> UP
     windlass_state = WINDLASS_UP;                                                           // Set the windlass state to UP    
     if (direction > 0) {                                                                    // If the windlass direction was DOWN
       conf_windlass["k"] = -1.0 * direction;                                                // Reverse direction
       chain_counter->set_direction(conf_windlass["k"]);                                     // Set the new config direction
     }
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : UP -> up = %.2f (%.3fV %.3fA) \t| direction = %f\n", up, up_volt, up_amp, conf_windlass["k"].as<float>());
+    Serial.printf("WINDLASS : UP -> up = %d (%.3fV %.3fA) \t| direction = %f\n", up, up_volt, up_amp, conf_windlass["k"].as<float>());
     #endif
   }
-  else if ((windlass_state == WINDLASS_DOWN) && (up <= threshold)) {                         // Windlass IDLE/UP -> DOWN
+  else if ((windlass_state == WINDLASS_DOWN) && (up <= windlass_threshold)) {                         // Windlass IDLE/UP -> DOWN
     if (direction < 0) {                                                                     // If the windlass direction was UP
       conf_windlass["k"] = abs(direction);                                                   // Reverse direction
       chain_counter->set_direction(conf_windlass["k"]);                                      // Set the new config direction
@@ -175,7 +178,7 @@ float readValueADS1115_A0_A1() {
       windlass_state = WINDLASS_IDLE;                                                        // Return to the windlass state IDLE
 
     #ifdef DEBUG_MODE
-    Serial.printf("WINDLASS : DOWN -> up = %.2f \t| direction = %f | timer = %i | windlass_state = %s\n", up, 
+    Serial.printf("WINDLASS : DOWN -> up = %d \t| direction = %f | timer = %i | windlass_state = %s\n", up, 
                   conf_windlass["k"].as<float>(), chain_counter_timer, 
                   (windlass_state == WINDLASS_DOWN) ? "DOWN" : "IDLE");
     #endif
@@ -200,31 +203,35 @@ float readValueADS1115_A0_A1() {
       chain_counter->set_direction(conf_windlass["k"]);                                      // Set the new config direction
     }
     #ifdef DEBUG_MODE
-    //Serial.printf("WINDLASS : IDLE -> up = %.2f (%.2fV %.2fA) \t| direction = %f | timer = %i | saved = %s\n", up,
-    //              up_volt, up_amp, conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
+    Serial.printf("WINDLASS : IDLE -> up = %d (%.3fV %.3fA) \t| direction = %f | timer = %i | saved = %s\n", up,
+                  up_volt, up_amp, conf_windlass["k"].as<float>(), chain_counter_timer, chain_counter_saved ? "true" : "false");
     #endif
   }
 
-  float a1_volt = convertValueToVoltage(a1, ADS1115_PGA_2_048);
-  float a0_volt = convertValueToVoltage(a0, ADS1115_PGA_2_048);
+  #ifdef DEBUG_MODE
+  float a1_volt = convertValueToVolts(a1, ADS1115_PGA_2_048);
+  float a0_volt = convertValueToVolts(a0, ADS1115_PGA_2_048);
   Serial.printf("WINDLASS : A0-A1 = %d (%.3fV %.3fA)\t A0 = %d (%.3fV %.3fA)\t A1 = %d (%.3fV %.3fA)\n",
                                 up, up_volt, up_amp,
-                                a0, a0_volt, convertVoltageToAmperes(a0_volt),
-                                a1, a1_volt, convertVoltageToAmperes(a1_volt));
-
+                                a0, a0_volt, convertVoltsToAmperes(a0_volt),
+                                a1, a1_volt, convertVoltsToAmperes(a1_volt));
+  #endif
   return ((float) up);
 }
 
 // Callback for the gypsy's reed sensor
-// Use a 10 kΩ pull-up resistor on the ADS1115 A2 input pin to read the reed sensor (~+3.3V = open, 0 = closed)
+// Use a 10 kΩ pull-down resistor on the ADS1115 A2 input pin to read the reed sensor (+3.3V = closed, 0 = open)
 float readValueADS1115_A2() {
   int16_t gypsy = readValue(ADS1115_MUX_AIN2_GND);
-  Serial.printf("WINDLASS : A2 = %.2f\n", gypsy);
-  // If the reed sensor state is open and PGA is set to 4.096, we ignore the values between 6800 and 7200
-  if ((gypsy >= 6800) && (gypsy <= 7200))
-    gypsy = -1.0;
+  #ifdef DEBUG_MODE
+  Serial.printf("WINDLASS : A2 = %d (%.3fV)\n", gypsy, convertValueToVolts(gypsy, ADS1115_PGA_4_096));
+  #endif
 
-  return ((float) gypsy);
+  // If the reed sensor state is open and PGA is set to 4.096, we ignore the values above the threshold
+  if (gypsy >= conf_windlass["gypsy_threshold"].as<int16_t>())
+    return (float) gypsy;
+
+  return 0.0;
 }
 
 // Callback for chain counter
@@ -319,15 +326,15 @@ void setupWindlassSensor() {
   // Initialize the persistent chain counter
   conf_windlass = jdoc_conf_windlass.to<JsonObject>();                                               // Store Windlass configuration
   conf_windlass["k"] = gypsy_circum;                                                                 // Default direction = DOWN
-  conf_windlass["threshold"] = ADS1115_WINDLASS_THRESHOLD;                                           // Default threshold = 26400
-  chain_counter = new PersistentIntegrator(gypsy_circum, 0.0, ADS1115_WINDLASS_THRESHOLD,
-                                            conf_path_chain[CHAIN_COUNTER_PATH]);                    // Chain counter in meter
+  conf_windlass["windlass_threshold"] = ADS1115_WINDLASS_THRESHOLD;                                  // Default threshold = 26400
+  conf_windlass["gypsy_threshold"] = ADS1115_GYPSY_THRESHOLD;                                        // Default threshold = 26400
+  chain_counter = new PersistentIntegrator(conf_path_chain[CHAIN_COUNTER_PATH]);                     // Chain counter in meter
   chain_counter->to_json(conf_windlass);                                                             // Retrieve last saved value if exists
 
   // Initialize the windlass sensor
   sensesp::RepeatSensor<float> *sensor_windlass_A0 = new sensesp::RepeatSensor<float>(chain_counter->get_windlass_delay(),
                                                                  readValueADS1115_A0_A1);            // Read the A0-A1 value (windlass) from the ADS1115 sensor
-  delay(50);                                                                                         // Wait to avoid RepeatSensor synchronisation issues
+  delay(50);                                                                                         // Wait 50 ms to avoid RepeatSensor synchronisation issues
 
   // Initialize the gypsy sensor
   sensesp::RepeatSensor<float> *sensor_gypsy_A1 = new sensesp::RepeatSensor<float>(chain_counter->get_gypsy_delay(), 
@@ -353,11 +360,13 @@ void setupWindlassSensor() {
   ConfigItem(chain_counter)
     ->set_title("Compteur Chaine")
     ->set_description("Compteur Chaine - PersistentIntegrator")
+    ->set_requires_restart(true)
     ->set_sort_order(UI_ORDER_CHAIN);
 
   ConfigItem(chain_debounce)
     ->set_title("Compteur Chaine Debounce")
     ->set_description("Compteur Chaine - DebounceInt")
+    ->set_requires_restart(true)
     ->set_sort_order(UI_ORDER_CHAIN+1);
 
   #ifdef DEBUG_MODE
