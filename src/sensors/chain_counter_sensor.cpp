@@ -8,7 +8,7 @@
   - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.22
+  @version 1.0.23
   @date 14/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
@@ -235,10 +235,10 @@ float readValueADS1115_A2() {
 }
 
 // Callback for chain counter
-// This function is called after each sensor_windlass value changes (after debounce)
+// This function is called after each gypsy sensor value changes (after debounce)
 void handleChainCounterChange() {
   float value = sensor_windlass_debounce->get();  // Get the current value from the debounced sensor
-  if (value == 0.0) {
+  if (value >= conf_windlass["gypsy_threshold"].as<int16_t>()) {
     chain_counter_saved = false;                  // Set the last value status to 'not saved'
     chain_counter_timer = 0;                      // Arm a timer to save chain counter last value after CHAIN_COUNTER_SAVE_TIMER cycles
     if (windlass_state == WINDLASS_IDLE) 
