@@ -55,7 +55,12 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - [Grafana OSS](https://grafana.com/grafana/download?pg=get&plcmt=selfmanaged-box1-cta1&edition=oss) (>= 11.3.0) - Visualize the InfluxDB data
 
 ## HARDWARE SETUP
-![Schéma_v7](https://github.com/user-attachments/assets/6006ebc8-a7bc-456a-aaca-7ce9d4a54592)
+### ENGINE SENSORS
+<img width="960" height="720" alt="Schéma_v8" src="https://github.com/user-attachments/assets/8d72d183-cbce-4b83-8609-ce7a16a78830" />
+
+### WINDLASS CHAIN COUNTER
+<img width="960" height="720" alt="Schéma_v8_Windlass" src="https://github.com/user-attachments/assets/8b6a4c42-1f96-43e7-8ef9-2a93f0cab44e" />
+
 > [!CAUTION]
 > - The ESP32 MUST be connected to the same 12V electrical circuit as your boat.
 > - If not, the sensors HAVE TO to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings.
