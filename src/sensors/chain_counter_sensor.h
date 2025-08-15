@@ -8,8 +8,8 @@
   - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.22
-  @date 14/08/2025
+  @version 1.0.23
+  @date 15/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 
   TODO : revoir la logique d'init / lecture / sauvegarde et types des valeurs
@@ -43,8 +43,8 @@
 #define ADS1115_PGA_4_096_RES      0.125
 #define ADS1115_PGA_2_048_RES      0.0625                 // Fix for ADS1115 lib
 #define ADS1115_PGA_1_024_RES      0.03125                // Fix for ADS1115 lib
-#define ADS1115_PGA_0_512_RES      0.015625
-#define ADS1115_PGA_0_256_RES      0.0078125
+#define ADS1115_PGA_0_512_RES      0.015625               // Fix for ADS1115 lib
+#define ADS1115_PGA_0_256_RES      0.0078125              // Fix for ADS1115 lib
 
 // HSTS016L characteristics
 #define HSTS016L_VREF               1.65f                 // Reference voltage Vref = +1.65V ; Vout = Vref + ±0.625V
@@ -53,14 +53,19 @@
 const String sk_path_windlass = "navigation.anchor.rodeDeployed";
 const String conf_path_chain[CHAIN_COUNTER_NB] = {  "/CONFIG/CHAINE/COUNTER", "/CONFIG/CHAINE/DELAY" };
 const float gypsy_circum = 0.43982;                       // Windlass gypsy circumference (meter) = 2π*r (ex: radius = 85 mm ; circum = 0.534071 m)
-const unsigned int read_delay_windlass = 500;             // Windlass read delay = 0.5s
 
+/*
+  Fix for ADS1115 lib
+  - This class overrides the readRegister and readRawValue methods to return signed integers
+  - The original ADS1115 class returns unsigned integers only that ignore negative values in differential mode
+  - Another fix is the resolution of the PGA used, which is not correctly set in the ADS1115 library
+*/ 
 class ADS1115Sensor : public ADS1115 {
   public:
   ADS1115Sensor(i2c_addr_t i2cSlaveAddr = ADS1115_WINDLASS_ADDR) : ADS1115(i2cSlaveAddr) {
 
     reset();
-    delayMicroseconds(50);                                        // Wait for the ADS1115 to reset
+    delayMicroseconds(50);                                  // Wait for the ADS1115 to reset
     setDeviceMode(ADS1115_MODE_SINGLE);                     // Single conversion
     setDataRate(ADS1115_DR_128_SPS);                        // ADS1115_DR_128_SPS
     setPga(ADS1115_PGA_4_096);                              // Set PGA to 4.096V 1 bit = 2mV @see https://forums.adafruit.com/viewtopic.php?t=186225
@@ -68,6 +73,7 @@ class ADS1115Sensor : public ADS1115 {
     setComparatorQueue(ADS1115_COMP_QUE_DISABLE);           // Disable comparator
   }
   
+  // Fix for readRegister (returns a signed integer instead of uint16_t)
   inline int16_t readRegister(reg_addr_t dataAddress) {
     Wire.beginTransmission((uint8_t) ADS1115_WINDLASS_ADDR);
     Wire.write(dataAddress);
@@ -83,12 +89,13 @@ class ADS1115Sensor : public ADS1115 {
     return -1;
   }
 
+  // Fix for readRawValue (returns a signed integer instead of uint16_t)
   inline int16_t readRawValue() {
 	  return readRegister(ADS1115_CONVERSION_REG_ADDR);
   }
 };
 
-// Override Integrator class with persistent last value, gypsy_circum and A0 pin threshold configuration
+// Override Integrator class with persistent last value, gypsy_circum and threshold configuration
 class PersistentIntegrator : public sensesp::FloatTransform {
   public:
   PersistentIntegrator(const String& config_path = "")

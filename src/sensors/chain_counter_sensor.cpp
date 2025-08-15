@@ -9,7 +9,7 @@
 
   @author kinyo666
   @version 1.0.23
-  @date 14/08/2025
+  @date 15/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
 */
 #include "chain_counter_sensor.h"
@@ -337,11 +337,11 @@ void setupWindlassSensor() {
   delay(50);                                                                                         // Wait 50 ms to avoid RepeatSensor synchronisation issues
 
   // Initialize the gypsy sensor
-  sensesp::RepeatSensor<float> *sensor_gypsy_A1 = new sensesp::RepeatSensor<float>(chain_counter->get_gypsy_delay(), 
+  sensesp::RepeatSensor<float> *sensor_gypsy_A2 = new sensesp::RepeatSensor<float>(chain_counter->get_gypsy_delay(), 
                                                                     readValueADS1115_A2);            // Read the A2 value (gypsy) with a delay
   sensesp::DebounceFloat *chain_debounce = new sensesp::DebounceFloat(CHAIN_COUNTER_DELAY_DEBOUNCE, 
                                                           conf_path_chain[CHAIN_COUNTER_PATH_DEBOUNCE]);
-  sensor_windlass_debounce = sensor_gypsy_A1->connect_to(chain_debounce);                            // Avoid multiples counts
+  sensor_windlass_debounce = sensor_gypsy_A2->connect_to(chain_debounce);                            // Avoid multiples counts
   auto *sensor_windlass_counter = sensor_windlass_debounce->connect_to(chain_counter);               // Add +/- gypsy_circum to the counter
   sensor_windlass_counter->attach(handleChainCounterChange);                                         // Set a callback for each value read
   sensor_windlass_counter
