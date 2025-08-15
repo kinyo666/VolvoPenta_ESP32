@@ -42,6 +42,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - PC817 rpm sensors (x2)
 - MPU6050 or MPU9250 motion sensor (x1)
 - Reed switch with magnet from a cycling computer wired (e.g Sigma) or burglar alarm (x1)
+- HSTS016L Hall effect current sensor 3.3V / 100A (x1)
 - Wifi Access Point (AP) where your ESP32 will connect to
 - [Visual Code Studio](https://code.visualstudio.com/) with [PlatformIO](https://platformio.org/) plugin
 - [Git Cli](https://cli.github.com/) (>= 2.74.2)
@@ -63,9 +64,10 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 1. Edit the library dependencies in [platformio.ini](/platformio.ini) :
   ```
   lib_deps = SignalK/SensESP@^3.1.0
-        SensESP/OneWire@^3.0.2
-        tinyu-zhao/INA3221@^0.0.1
-        electroniccats/MPU6050@^1.4.1
+              SensESP/OneWire@^3.0.2
+              tinyu-zhao/INA3221@^0.0.1
+              electroniccats/MPU6050@^1.4.1
+              wh1terabbithu/ADS1115-Driver@^1.0.2
   ```
 2. Adjust the build_flags in [platformio.ini](/platformio.ini) :
   ```
