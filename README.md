@@ -3,9 +3,9 @@
 This is the ESP32 part of the project to digitize Volvo Penta TAMD40 marine engine :motor_boat:
 It is sized to fit with 2 TAMD engines (portside and starboard) but can easily be restricted to only one.
 > [!NOTE]
-> - This code is also suitable for others Volvo Penta TAMD/TMD/AQAD engines but haven't been tested.
+> - This code is also suitable for others Volvo Penta TAMD/TMD/AQAD engines but haven't been tested
 > - The hardware configuration allows you to continue using the analog dashboard without any disruption
-## FEATURES
+## 1. FEATURES
   Digital dashboard :
   - [x] Coolant temperature
   - [x] Oil pressure
@@ -29,13 +29,13 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   - [x] Run-time configuration (Wifi AP / webserver)
 
   > [!WARNING]
-  > - The run-time configuration is stored in the ESP32's flash memory and overrides the compile-time values.
-  > - This feature is very useful because it allows you to change any value and restart the ESP32 to apply the new configuration without any coding.
-  > - Since there is no 'ls -all' or 'dir' command, be careful when adding a new configuration path or using an existing one as it can create conflicts and unexpected behaviour.
-  > - Values **MUST** be calibrated before using at sea.
+  > - The run-time configuration is stored in the ESP32's flash memory and overrides the compile-time values
+  > - This feature is very useful because it allows you to change any value and restart the ESP32 to apply the new configuration without any coding
+  > - Since there is no 'ls -all' or 'dir' command, be careful when adding a new configuration path or using an existing one as it can create conflicts and unexpected behaviour
+  > - Values **MUST** be calibrated before using at sea
 
-## WHAT YOU NEED
-### MUST-HAVE
+## 2. WHAT YOU NEED
+### 2.1 MUST-HAVE
 - ESP32 Wroom32
 - INA3221 volt sensors (x4)
 - DS18B20 temperature sensors (x3)
@@ -49,23 +49,23 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 - [Signal K](http://signalk.org) Server running on you local network with plugins (KIP, ...)
 - [SensESP SDK](https://github.com/SignalK/SensESP) (>= 3.1.0)
 
-### NICE TO HAVE
+### 2.2 NICE TO HAVE
 - [Raspberry Pi](https://www.raspberrypi.com/products/) (4B or 5) - Signal K server, InfluxDB and Grafana
 - [InfluxDB OSS](https://www.influxdata.com/downloads/) (>= 2.7.10) - Store Signal K values
 - [Grafana OSS](https://grafana.com/grafana/download?pg=get&plcmt=selfmanaged-box1-cta1&edition=oss) (>= 11.3.0) - Visualize the InfluxDB data
 
-## HARDWARE SETUP
-### ENGINE SENSORS
+## 3. HARDWARE SETUP
+### 3.1 ENGINE SENSORS
 <img width="960" height="720" alt="Schéma_v8" src="https://github.com/user-attachments/assets/8d72d183-cbce-4b83-8609-ce7a16a78830" />
 
-### WINDLASS CHAIN COUNTER
+### 3.2 WINDLASS CHAIN COUNTER
 <img width="960" height="720" alt="Schéma_v8_Windlass" src="https://github.com/user-attachments/assets/8b6a4c42-1f96-43e7-8ef9-2a93f0cab44e" />
 
 > [!CAUTION]
-> - The ESP32 **MUST** be connected to the same 12V electrical circuit as your boat.
-> - If not, the sensors **HAVE TO** to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings.
+> - The ESP32 **MUST** be connected to the same 12V electrical circuit as your boat
+> - If not, the sensors **HAVE TO** to be connected to ground on your boat's 12V circuit otherwise you will get inaccurate and irrelevant readings
 
-## HOW TO INSTALL
+## 4. HOW TO INSTALL
 **1. Edit the library dependencies in [platformio.ini](/platformio.ini) :**
   ```
   lib_deps = SignalK/SensESP@^3.1.0
