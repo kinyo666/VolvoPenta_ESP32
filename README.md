@@ -70,8 +70,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   ```
   lib_deps = SignalK/SensESP@^3.1.0
               SensESP/OneWire@^3.0.2
-              tinyu-zhao/INA3221@^0.0.1<img width="960" height="720" alt="Schéma_v8" src="https://github.com/user-attachments/assets/0afaf425-60de-4001-b738-cced9cd9c942" />
-
+              tinyu-zhao/INA3221@^0.0.1
               electroniccats/MPU6050@^1.4.1
               wh1terabbithu/ADS1115-Driver@^1.0.2
   ```
