@@ -8,11 +8,9 @@
   - The ADS1115 is optional and can be replaced with internal ESP32's ADC1
 
   @author kinyo666
-  @version 1.0.23
-  @date 15/08/2025
+  @version 1.0.25
+  @date 27/08/2025
   @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
-
-  TODO : revoir la logique d'init / lecture / sauvegarde et types des valeurs
 */
 #ifndef CHAIN_COUNTER_SENSOR_H
 #define CHAIN_COUNTER_SENSOR_H
@@ -21,30 +19,32 @@
 #include <sensesp/sensors/sensor.h>
 #include <sensesp/transforms/transform.h>
 #include <sensesp/transforms/debounce.h>
+#include <sensesp/transforms/linear.h>
 #include <sensesp/signalk/signalk_output.h>
 #include <helper_3dmath.h>
 #include "customClasses.h"
 
 // Windlass Chain counter
-#define CHAIN_COUNTER_SAVE_TIMER      20                  // Save the chain counter value every 20 cycles (20 * read_delay_windlass = 10 seconds)
-#define CHAIN_COUNTER_PATH            0                   // Index of config_path for PersistentIntegrator
-#define CHAIN_COUNTER_PATH_DEBOUNCE   1                   // Index of config_path for Debounce object
-#define CHAIN_COUNTER_NB              2                   // Size of conf_path_chain[]
-#define CHAIN_COUNTER_DELAY_DEBOUNCE  400                 // Default delay to ignore multiples chain counter readings. Must be less than gypsy_delay
-#define CHAIN_COUNTER_DELAY_GYPSY     500                 // Default delay to read gypsy sensor (ms)
-#define CHAIN_COUNTER_DELAY_WINDLASS  500                 // Default delay to read windlass sensor (ms)
-#define CHAIN_COUNTER_UI_CYCLE        1                   // Number of cycles to wait before refreshing the UI symbol direction to IDLE
+#define CHAIN_COUNTER_SAVE_TIMER        20                // Save the chain counter value every 20 cycles (20 * read_delay_windlass = 10 seconds)
+#define CHAIN_COUNTER_PATH              0                 // Index of config_path for PersistentIntegrator
+#define CHAIN_COUNTER_PATH_DEBOUNCE     1                 // Index of config_path for Debounce object
+#define CHAIN_COUNTER_NB                2                 // Size of conf_path_chain[]
+#define CHAIN_COUNTER_DELAY_DEBOUNCE    400               // Default delay to ignore multiples chain counter readings. Must be less than gypsy_delay
+#define CHAIN_COUNTER_DELAY_GYPSY       500               // Default delay to read gypsy sensor (ms)
+#define CHAIN_COUNTER_DELAY_WINDLASS    500               // Default delay to read windlass sensor (ms)
+#define CHAIN_COUNTER_UI_CYCLE          1                 // Number of cycles to wait before refreshing the UI symbol direction to IDLE
 
 // ADS1115 configuration
 #define ADS1115_WINDLASS_ADDR ADS1115_I2C_ADDR_GND        // I2C address = 0x48 GND (<-- change here if needed)
-#define ADS1115_WINDLASS_THRESHOLD 26400                  // Windlass threshold (depending on the HSTS016L sensor model and PGA used)
-#define ADS1115_GYPSY_THRESHOLD    26400                  // Gypsy threshold (depending on the HSTS016L sensor model and PGA used)
-#define ADS1115_PGA_6_144_RES      0.1875
-#define ADS1115_PGA_4_096_RES      0.125
-#define ADS1115_PGA_2_048_RES      0.0625                 // Fix for ADS1115 lib
-#define ADS1115_PGA_1_024_RES      0.03125                // Fix for ADS1115 lib
-#define ADS1115_PGA_0_512_RES      0.015625               // Fix for ADS1115 lib
-#define ADS1115_PGA_0_256_RES      0.0078125              // Fix for ADS1115 lib
+#define ADS1115_WINDLASS_THRESHOLD_HIGH 26400             // Windlass threshold high (depending on the HSTS016L sensor model and PGA used)
+#define ADS1115_WINDLASS_THRESHOLD_LOW  4500              // Windlass threshold low (depending on the HSTS016L sensor model and PGA used)
+#define ADS1115_GYPSY_THRESHOLD         26000             // Gypsy threshold (+3.3V = 26400)
+#define ADS1115_PGA_6_144_RES           0.1875
+#define ADS1115_PGA_4_096_RES           0.125
+#define ADS1115_PGA_2_048_RES           0.0625            // Fix for ADS1115 lib
+#define ADS1115_PGA_1_024_RES           0.03125           // Fix for ADS1115 lib
+#define ADS1115_PGA_0_512_RES           0.015625          // Fix for ADS1115 lib
+#define ADS1115_PGA_0_256_RES           0.0078125         // Fix for ADS1115 lib
 
 // HSTS016L characteristics
 #define HSTS016L_VREF               1.65f                 // Reference voltage Vref = +1.65V ; Vout = Vref + ±0.625V
@@ -131,7 +131,8 @@ class PersistentIntegrator : public sensesp::FloatTransform {
   inline void reset() { 
     k = gypsy_circum;
     value = 0.0;
-    windlass_threshold = ADS1115_WINDLASS_THRESHOLD;
+    windlass_threshold_high = ADS1115_WINDLASS_THRESHOLD_HIGH;
+    windlass_threshold_low = ADS1115_WINDLASS_THRESHOLD_LOW;
     windlass_delay = CHAIN_COUNTER_DELAY_WINDLASS;
     gypsy_threshold = ADS1115_GYPSY_THRESHOLD;
     gypsy_delay = CHAIN_COUNTER_DELAY_GYPSY;
@@ -141,7 +142,8 @@ class PersistentIntegrator : public sensesp::FloatTransform {
   inline bool to_json(JsonObject& doc) {
     doc["k"] = k;
     doc["value"] = value;
-    doc["windlass_threshold"] = windlass_threshold;
+    doc["windlass_threshold_high"] = windlass_threshold_high;
+    doc["windlass_threshold_low"] = windlass_threshold_low;
     doc["windlass_delay"] = windlass_delay;
     doc["gypsy_threshold"] = gypsy_threshold;
     doc["gypsy_delay"] = gypsy_delay;
@@ -155,7 +157,8 @@ class PersistentIntegrator : public sensesp::FloatTransform {
       }
     k = config["k"];
     value = (config["value"].is<float>() ? config["value"] : 0.0);    // May not have a value at the first load
-    windlass_threshold = (config["windlass_threshold"].is<int>() ? config["windlass_threshold"] : ADS1115_WINDLASS_THRESHOLD);
+    windlass_threshold_high = (config["windlass_threshold_high"].is<int>() ? config["windlass_threshold_high"] : ADS1115_WINDLASS_THRESHOLD_HIGH);
+    windlass_threshold_low = (config["windlass_threshold_low"].is<int>() ? config["windlass_threshold_low"] : ADS1115_WINDLASS_THRESHOLD_LOW);
     windlass_delay = (config["windlass_delay"].is<int>() ? config["windlass_delay"] : CHAIN_COUNTER_DELAY_WINDLASS);
     gypsy_threshold = (config["gypsy_threshold"].is<int>() ? config["gypsy_threshold"] : ADS1115_GYPSY_THRESHOLD);
     gypsy_delay = (config["gypsy_delay"].is<int>() ? config["gypsy_delay"] : CHAIN_COUNTER_DELAY_GYPSY);
@@ -166,7 +169,8 @@ class PersistentIntegrator : public sensesp::FloatTransform {
  private:
   float k;                                                     // Multiplier for the integrator (gypsy circumference)
   float value = 0.0;                                           // Last value of the integrator (rode deployed)
-  int windlass_threshold = ADS1115_WINDLASS_THRESHOLD;         // Threshold value to determine if windlass UP direction is active (A0 pin, default 26400)
+  int windlass_threshold_high = ADS1115_WINDLASS_THRESHOLD_HIGH;         // Threshold value to determine if windlass UP direction is active (A0 pin, default 26400)
+  int windlass_threshold_low = ADS1115_WINDLASS_THRESHOLD_LOW;           // Threshold value to determine if windlass DOWN direction is active (A1 pin, default 26400)
   int gypsy_threshold = ADS1115_GYPSY_THRESHOLD;               // Threshold value to determine if gypsy DOWN direction is active (A2 pin, default 26400)
   unsigned int windlass_delay = CHAIN_COUNTER_DELAY_WINDLASS;  // Default 500ms
   unsigned int gypsy_delay = CHAIN_COUNTER_DELAY_GYPSY;        // Default 500ms
