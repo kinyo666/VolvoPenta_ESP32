@@ -6,7 +6,7 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
 > - This code is also suitable for others Volvo Penta TAMD/TMD/AQAD engines but haven't been tested
 > - The hardware configuration allows you to continue using the analog dashboard without any disruption
 ## 1. FEATURES
-  Digital dashboard :
+### 1.1 DIGITAL DASHBOARD
   - [x] Coolant temperature
   - [x] Oil pressure
   - [x] Voltage
@@ -21,8 +21,10 @@ It is sized to fit with 2 TAMD engines (portside and starboard) but can easily b
   - [x] Motion sensor (roll, pitch, yaw)
   - [ ] Autopilot
   - [X] Rudder Angle
-  
-  ESP32 special features :
+
+![Screenshot_1](https://github.com/user-attachments/assets/e667a5c4-580b-4f30-be8e-da017c552834)
+![Screenshot_2](https://github.com/user-attachments/assets/351f9a0c-1360-4526-9d82-ca90c349fd45)
+### 1.2 ESP32 SPECIAL FEATURES
   - [x] INA3221 auto sleep mode (power down / energy saving)
   - [x] MPU6050 auto calibration (persistent offset)
   - [x] Global features enabling / disabling by checkbox on the SensESP UI
