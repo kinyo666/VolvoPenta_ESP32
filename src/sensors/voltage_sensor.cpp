@@ -8,9 +8,9 @@
     - Engines INA3221 sensors are powered down after 60 seconds if the engine is off
 
   @author kinyo666
-  @version 1.0.18
-  @date 04/08/2025
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @version 1.0.25
+  @date 04/09/2025
+  @link GitHub source code : https://github.com/kinyo666/VolvoPenta_ESP32
 */
 #include "voltage_sensor.h"
 

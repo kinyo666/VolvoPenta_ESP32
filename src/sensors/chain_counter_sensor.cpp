@@ -9,8 +9,8 @@
 
   @author kinyo666
   @version 1.0.25
-  @date 27/08/2025
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @date 04/09/2025
+  @link GitHub source code : https://github.com/kinyo666/VolvoPenta_ESP32
 */
 #include "chain_counter_sensor.h"
 

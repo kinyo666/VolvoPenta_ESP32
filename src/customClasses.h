@@ -6,9 +6,9 @@
   - ConfigSchema for ConfigSensESP and Persistent Integrator
 
   @author kinyo666
-  @version 1.0.20
-  @date 06/08/2025
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @version 1.0.25
+  @date 04/09/2025
+  @link GitHub source code : https://github.com/kinyo666/VolvoPenta_ESP32
 */
 #ifndef CUSTOM_CLASSES_H
 #define CUSTOM_CLASSES_H

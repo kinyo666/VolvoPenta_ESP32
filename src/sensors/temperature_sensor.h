@@ -7,9 +7,9 @@
   - Temperature values are converted to Kelvin and filtered to avoid out of range values
 
   @author kinyo666
-  @version 1.0.18
-  @date 04/08/2025
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @version 1.0.25
+  @date 04/09/2025
+  @link GitHub source code : https://github.com/kinyo666/VolvoPenta_ESP32
 */
 #ifndef TEMPERATURE_SENSOR_H
 #define TEMPERATURE_SENSOR_H

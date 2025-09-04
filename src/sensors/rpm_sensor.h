@@ -5,9 +5,9 @@
     - If INA3221_POWERDOWN is enabled, it will power down the INA3221 when the engine is off
   
   @author kinyo666
-  @version 1.0.19
-  @date 04/08/2025
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @version 1.0.25
+  @date 04/09/2025
+  @link GitHub source code : https://github.com/kinyo666/VolvoPenta_ESP32
 */
 #ifndef RPM_SENSOR_H
 #define RPM_SENSOR_H

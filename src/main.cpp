@@ -1,10 +1,10 @@
 /*
   @TODO :
   P1
-  - Ajouter une moyenne de consommation de carburant réelle
-  - Intégrer la lib MPU9250
+  - Add a real-world fuel consumption average
+  - Integrate the MPU9250 library
   P2
-  - Surcharger la classe SKMetaData pour envoyer les données de zones
+  - Override the SKMetaData class to send zone data
 
   Volvo Penta digital dashboard :
   - Coolant temperature (°C, F)
@@ -20,10 +20,10 @@
   - Motion sensor (Roll / Pitch / Yaw)
 
   @author kinyo666
-  @version 1.0.20
-  @date 10/08/2025
+  @version 1.0.25
+  @date 04/09/2025
   @ref SensESP v3.1.0
-  @link GitHub source code : https://github.com/kinyo666/Capteurs_ESP32
+  @link GitHub source code : https://github.com/kinyo666/VolvoPenta_ESP32
 
   Technical documentation :
   @link SensESP Documentation : https://signalk.org/SensESP/
